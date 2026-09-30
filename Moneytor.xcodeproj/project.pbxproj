@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0044EF8EAA66268E107C8F0A /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB54B45B59885920B24C8DE7 /* WidgetSnapshot.swift */; };
+		0EDBEC179ABD7A62EC58763E /* MonthOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FC3A2E274ED559C0EE511E9 /* MonthOverview.swift */; };
 		12AF06254CD564134003FA12 /* AIIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7DBE8168D3364A0F2E61200 /* AIIcon.swift */; };
 		1669FA6E90FA88FCE3CAB1E9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBEDB7F24F15D4F57889F3E /* SettingsView.swift */; };
 		1C63B87EF6B4333BCA98AB9F /* SummaryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = CECD7E49B93497D9C10FC515 /* SummaryCard.swift */; };
@@ -18,48 +20,87 @@
 		496649457DF3D50CB26A11E3 /* IncomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FA50D5188FEC76E9E0CFAC1 /* IncomeView.swift */; };
 		51139586AA9B5D50A244E165 /* CategoryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19DB7DC1ABE7AC87A75C5464 /* CategoryEditor.swift */; };
 		519231955728B3F0CB9E598B /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = D46B80333D72CFFCE7243743 /* MLXLMCommon */; };
+		543E84EC8C371196CDF64151 /* MoneytorWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40565D70C3570C8DA93883EF /* MoneytorWidget.swift */; };
 		54FC35793BD68F7C6DA28861 /* MoneytorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6524B7CAD1C4C1B4EA08460F /* MoneytorApp.swift */; };
 		5BCD044C7A699C91011B508A /* TimelineDayRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76E7B9059EE525738A28105B /* TimelineDayRow.swift */; };
 		68FB639DC6EE5B7BE35E02E3 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435AEEA0F02C3C214AA98A59 /* SpeechRecognizer.swift */; };
+		80D595DA9F07FFA1959A5684 /* MoneytorWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0C6923FAF1110E2DEA38CE6A /* MoneytorWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		84E0478CBFC5121A3641F749 /* CalculatorField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A43E49483C6035D06F9E3C /* CalculatorField.swift */; };
 		9046640BB17F77017D049604 /* HuggingFace in Frameworks */ = {isa = PBXBuildFile; productRef = E6EE246067E1E8DF16848203 /* HuggingFace */; };
 		9B28AF3A1C11FEEE33AFAEE2 /* BillReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE32AD9E442AB5C0D9956E3 /* BillReminders.swift */; };
+		9C2B59D4AFEE73CFA040DCC7 /* WidgetSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCD25C49199BE91D767B935 /* WidgetSync.swift */; };
 		A04612CA3196B9D5FE81BA7C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD752C84FA41CD8D4312386E /* Models.swift */; };
 		AB5DA6E2925C15B90B64F802 /* LogSpendingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CA81A27E52027037F23B531 /* LogSpendingSheet.swift */; };
 		B91A1B57E089493D82701B7F /* IncomeLinking.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56425DA224700B687E2DAFEB /* IncomeLinking.swift */; };
 		BC2F7E02D2F6CF25F593CB10 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B14E8C87DAE94FBC028F93EE /* AssistantView.swift */; };
 		C5C783FA64077A01B0280A28 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = 5932BBF0BE7886CCC13F7FB4 /* Tokenizers */; };
 		C60ED57F33DAC39B2C93C92D /* ExpenseHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B2A91615D981672C6EF4CA /* ExpenseHistory.swift */; };
+		CCDAC120D17997E4629C9C2A /* TransferSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C619DDC047405CC1A82C05A5 /* TransferSheet.swift */; };
 		D04F41894B5723BF2DD46F34 /* AssistantShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FF16ED38CC0C6F713AC109 /* AssistantShortcut.swift */; };
 		D1C25E34FDDEC2E515E30407 /* MoneyField.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB25591EF5C1E0D6CABAD07 /* MoneyField.swift */; };
+		EBE7E0A86C460700D7C620E1 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB54B45B59885920B24C8DE7 /* WidgetSnapshot.swift */; };
 		F6B1478263AA959CB95CA1A6 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = F5DE2D08589E48D5656895C6 /* MLXLLM */; };
 		F8E829E1EF3AA17AC8C3E721 /* LocalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314FD8F3BF2E4CEE9464E9AE /* LocalModel.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		FA0267959611629B01D361E2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0DC580F64ECE3C62684480FE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6A45EF79F9A08CBF5F1920B4;
+			remoteInfo = MoneytorWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7A72FF834573613C91195DD9 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				80D595DA9F07FFA1959A5684 /* MoneytorWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		05A43E49483C6035D06F9E3C /* CalculatorField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalculatorField.swift; sourceTree = "<group>"; };
+		0C6923FAF1110E2DEA38CE6A /* MoneytorWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = MoneytorWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19DB7DC1ABE7AC87A75C5464 /* CategoryEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryEditor.swift; sourceTree = "<group>"; };
 		1FE32AD9E442AB5C0D9956E3 /* BillReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillReminders.swift; sourceTree = "<group>"; };
 		314FD8F3BF2E4CEE9464E9AE /* LocalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModel.swift; sourceTree = "<group>"; };
+		40565D70C3570C8DA93883EF /* MoneytorWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneytorWidget.swift; sourceTree = "<group>"; };
 		435AEEA0F02C3C214AA98A59 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		4FA50D5188FEC76E9E0CFAC1 /* IncomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomeView.swift; sourceTree = "<group>"; };
+		52BF13347708D521444AAE5A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		555B9EC2A4126D32CA33FFDA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56425DA224700B687E2DAFEB /* IncomeLinking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomeLinking.swift; sourceTree = "<group>"; };
 		6524B7CAD1C4C1B4EA08460F /* MoneytorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneytorApp.swift; sourceTree = "<group>"; };
 		6AC50F40791841EE1D015FB5 /* BudgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetView.swift; sourceTree = "<group>"; };
-		7224432F2A1C507C13482D49 /* Moneytor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Moneytor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6FC3A2E274ED559C0EE511E9 /* MonthOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthOverview.swift; sourceTree = "<group>"; };
+		7224432F2A1C507C13482D49 /* Moneytor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Moneytor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		76E7B9059EE525738A28105B /* TimelineDayRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineDayRow.swift; sourceTree = "<group>"; };
 		7CA81A27E52027037F23B531 /* LogSpendingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogSpendingSheet.swift; sourceTree = "<group>"; };
+		A2E1B58A3CB636E6EB3A6E2A /* Moneytor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Moneytor.entitlements; sourceTree = "<group>"; };
 		ACB25591EF5C1E0D6CABAD07 /* MoneyField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyField.swift; sourceTree = "<group>"; };
 		B14E8C87DAE94FBC028F93EE /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
 		B7DBE8168D3364A0F2E61200 /* AIIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIIcon.swift; sourceTree = "<group>"; };
 		BBBEDB7F24F15D4F57889F3E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C1D0F25DC6B17D5EFE76F267 /* Assistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Assistant.swift; sourceTree = "<group>"; };
+		C619DDC047405CC1A82C05A5 /* TransferSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferSheet.swift; sourceTree = "<group>"; };
 		CADE41E0696CABD0103E17DA /* NewMonthSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMonthSheet.swift; sourceTree = "<group>"; };
+		CDCD25C49199BE91D767B935 /* WidgetSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSync.swift; sourceTree = "<group>"; };
 		CECD7E49B93497D9C10FC515 /* SummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryCard.swift; sourceTree = "<group>"; };
+		CFC4154EEC1C977AAE73AB38 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D0FF16ED38CC0C6F713AC109 /* AssistantShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantShortcut.swift; sourceTree = "<group>"; };
 		D8B2A91615D981672C6EF4CA /* ExpenseHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseHistory.swift; sourceTree = "<group>"; };
+		D8B588310768F4713D53F151 /* MoneytorWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MoneytorWidget.entitlements; sourceTree = "<group>"; };
 		DA2B46AA9DAE2A3D2349E673 /* UpcomingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpcomingView.swift; sourceTree = "<group>"; };
+		EB54B45B59885920B24C8DE7 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
 		FD752C84FA41CD8D4312386E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -78,10 +119,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0312ABBE74A074070CD1015D /* MoneytorWidget */ = {
+			isa = PBXGroup;
+			children = (
+				CFC4154EEC1C977AAE73AB38 /* Info.plist */,
+				D8B588310768F4713D53F151 /* MoneytorWidget.entitlements */,
+				40565D70C3570C8DA93883EF /* MoneytorWidget.swift */,
+			);
+			path = MoneytorWidget;
+			sourceTree = "<group>";
+		};
 		0A76AD6DF65A80E82AD5DADC = {
 			isa = PBXGroup;
 			children = (
 				43C39602B50DE2A629355B24 /* Moneytor */,
+				0312ABBE74A074070CD1015D /* MoneytorWidget */,
+				8DF2596397EA27B23901D48B /* Shared */,
 				8CCC5F907A2553E5AEAB6455 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -101,17 +154,22 @@
 				D8B2A91615D981672C6EF4CA /* ExpenseHistory.swift */,
 				56425DA224700B687E2DAFEB /* IncomeLinking.swift */,
 				4FA50D5188FEC76E9E0CFAC1 /* IncomeView.swift */,
+				52BF13347708D521444AAE5A /* Info.plist */,
 				314FD8F3BF2E4CEE9464E9AE /* LocalModel.swift */,
 				7CA81A27E52027037F23B531 /* LogSpendingSheet.swift */,
 				FD752C84FA41CD8D4312386E /* Models.swift */,
 				ACB25591EF5C1E0D6CABAD07 /* MoneyField.swift */,
+				A2E1B58A3CB636E6EB3A6E2A /* Moneytor.entitlements */,
 				6524B7CAD1C4C1B4EA08460F /* MoneytorApp.swift */,
+				6FC3A2E274ED559C0EE511E9 /* MonthOverview.swift */,
 				CADE41E0696CABD0103E17DA /* NewMonthSheet.swift */,
 				BBBEDB7F24F15D4F57889F3E /* SettingsView.swift */,
 				435AEEA0F02C3C214AA98A59 /* SpeechRecognizer.swift */,
 				CECD7E49B93497D9C10FC515 /* SummaryCard.swift */,
 				76E7B9059EE525738A28105B /* TimelineDayRow.swift */,
+				C619DDC047405CC1A82C05A5 /* TransferSheet.swift */,
 				DA2B46AA9DAE2A3D2349E673 /* UpcomingView.swift */,
+				CDCD25C49199BE91D767B935 /* WidgetSync.swift */,
 			);
 			path = Moneytor;
 			sourceTree = "<group>";
@@ -120,13 +178,39 @@
 			isa = PBXGroup;
 			children = (
 				7224432F2A1C507C13482D49 /* Moneytor.app */,
+				0C6923FAF1110E2DEA38CE6A /* MoneytorWidget.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		8DF2596397EA27B23901D48B /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				EB54B45B59885920B24C8DE7 /* WidgetSnapshot.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		6A45EF79F9A08CBF5F1920B4 /* MoneytorWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9E62CBDE582F955FDC9B4B97 /* Build configuration list for PBXNativeTarget "MoneytorWidget" */;
+			buildPhases = (
+				ED6D8F8BE7960727991A3C6E /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MoneytorWidget;
+			packageProductDependencies = (
+			);
+			productName = MoneytorWidget;
+			productReference = 0C6923FAF1110E2DEA38CE6A /* MoneytorWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		9EC7B8AB22B87839BC4CCC37 /* Moneytor */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D9CCA25CADE4BDFB53C3A200 /* Build configuration list for PBXNativeTarget "Moneytor" */;
@@ -134,10 +218,12 @@
 				A6A00374933DE72FDAF254B2 /* Sources */,
 				CE75FBA299A71267CDC39DBB /* Resources */,
 				4F7569DA17CE1D9B0E99A01A /* Frameworks */,
+				7A72FF834573613C91195DD9 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5A210AC77DEA467C9E3F4A73 /* PBXTargetDependency */,
 			);
 			name = Moneytor;
 			packageProductDependencies = (
@@ -159,7 +245,12 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					6A45EF79F9A08CBF5F1920B4 = {
+						DevelopmentTeam = 9P2K2679GT;
+						ProvisioningStyle = Automatic;
+					};
 					9EC7B8AB22B87839BC4CCC37 = {
+						DevelopmentTeam = 9P2K2679GT;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -184,6 +275,7 @@
 			projectRoot = "";
 			targets = (
 				9EC7B8AB22B87839BC4CCC37 /* Moneytor */,
+				6A45EF79F9A08CBF5F1920B4 /* MoneytorWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -220,16 +312,37 @@
 				A04612CA3196B9D5FE81BA7C /* Models.swift in Sources */,
 				D1C25E34FDDEC2E515E30407 /* MoneyField.swift in Sources */,
 				54FC35793BD68F7C6DA28861 /* MoneytorApp.swift in Sources */,
+				0EDBEC179ABD7A62EC58763E /* MonthOverview.swift in Sources */,
 				260539CCDCEE20A9220AE50D /* NewMonthSheet.swift in Sources */,
 				1669FA6E90FA88FCE3CAB1E9 /* SettingsView.swift in Sources */,
 				68FB639DC6EE5B7BE35E02E3 /* SpeechRecognizer.swift in Sources */,
 				1C63B87EF6B4333BCA98AB9F /* SummaryCard.swift in Sources */,
 				5BCD044C7A699C91011B508A /* TimelineDayRow.swift in Sources */,
+				CCDAC120D17997E4629C9C2A /* TransferSheet.swift in Sources */,
 				20AAEC48CBE43B2704E7CED7 /* UpcomingView.swift in Sources */,
+				0044EF8EAA66268E107C8F0A /* WidgetSnapshot.swift in Sources */,
+				9C2B59D4AFEE73CFA040DCC7 /* WidgetSync.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ED6D8F8BE7960727991A3C6E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				543E84EC8C371196CDF64151 /* MoneytorWidget.swift in Sources */,
+				EBE7E0A86C460700D7C620E1 /* WidgetSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5A210AC77DEA467C9E3F4A73 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6A45EF79F9A08CBF5F1920B4 /* MoneytorWidget */;
+			targetProxy = FA0267959611629B01D361E2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		17BE17DFC09281EECA1FD4E5 /* Debug */ = {
@@ -237,11 +350,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Moneytor/Moneytor.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9P2K2679GT;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Moneytor/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Moneytor;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Moneytor listens when you use Speak mode in the assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Moneytor turns what you say into text so the assistant can log it.";
@@ -255,6 +370,52 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tan.moneytor.app;
 				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		210754D6AAF8B5D82F0287C8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MoneytorWidget/MoneytorWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9P2K2679GT;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MoneytorWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tan.moneytor.app.widget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		4929DB8DE306E2E7339FA77C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MoneytorWidget/MoneytorWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9P2K2679GT;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MoneytorWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tan.moneytor.app.widget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -384,11 +545,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Moneytor/Moneytor.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9P2K2679GT;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Moneytor/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Moneytor;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Moneytor listens when you use Speak mode in the assistant.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Moneytor turns what you say into text so the assistant can log it.";
@@ -415,6 +578,15 @@
 			buildConfigurations = (
 				76D18AFC087ABFE7B57135D1 /* Debug */,
 				4B629B28C38785E44C63880B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9E62CBDE582F955FDC9B4B97 /* Build configuration list for PBXNativeTarget "MoneytorWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4929DB8DE306E2E7339FA77C /* Debug */,
+				210754D6AAF8B5D82F0287C8 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

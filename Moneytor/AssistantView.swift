@@ -35,32 +35,73 @@ struct AssistantView: View {
                         ForEach(assistant.messages) { message in
                             MessageBubble(message: message)
                         }
-                        if assistant.isThinking {
+                        if assistant.isThinking && localModel.isReady {
                             AIIcon(size: 22, isAnimating: true)
                                 .padding(12)
                                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+                        } else if assistant.isThinking {
+                            // Three dots rising one after another, like someone typing.
+                            TimelineView(.animation) { timeline in
+                                let phase: Double = timeline.date.timeIntervalSinceReferenceDate * 2 * .pi / 1.1
+                                HStack(spacing: 5) {
+                                    ForEach(0..<3, id: \.self) { index in
+                                        let wave: Double = max(0, sin(phase - Double(index) * 0.7))
+                                        Circle()
+                                            .fill(Color.secondary)
+                                            .frame(width: 8, height: 8)
+                                            .opacity(0.35 + 0.65 * wave)
+                                            .offset(y: -4 * wave)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 15)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+                            .id("typing")
+                            .transition(.scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity))
+                            .accessibilityLabel("Typing")
                         }
                     }
                     .padding()
+                    .animation(.snappy(duration: 0.2), value: assistant.isThinking)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: assistant.messages.count) {
                     withAnimation { proxy.scrollTo(assistant.messages.last?.id, anchor: .bottom) }
                 }
+                .onChange(of: assistant.isThinking) { _, isThinking in
+                    if isThinking { withAnimation { proxy.scrollTo("typing", anchor: .bottom) } }
+                }
             }
             .safeAreaInset(edge: .bottom) { inputBar }
-            .navigationTitle("Assistant")
+            .navigationTitle(localModel.isDownloaded ? "AI Assistant" : "Basic Assistant")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .principal) {
+                    // The badge says what's answering: the downloaded AI model, or the built-in rules.
+                    let isAI = localModel.isDownloaded
                     HStack(spacing: 6) {
                         AIIcon(size: 18, isAnimating: assistant.isThinking)
                         Text("Assistant")
                             .font(.headline)
+                        Text(isAI ? "AI" : "Basic")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(isAI ? Color.white : Color.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background {
+                                if isAI {
+                                    Capsule().fill(LinearGradient(colors: AIIcon.colors, startPoint: .leading, endPoint: .trailing))
+                                } else {
+                                    Capsule().fill(Color(.tertiarySystemFill))
+                                }
+                            }
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(isAI ? "AI Assistant" : "Basic Assistant")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Toggle(isOn: $speaksReplies) {
@@ -74,6 +115,7 @@ struct AssistantView: View {
         }
         // Otherwise a slight downward move while holding the mic can start closing the sheet.
         .interactiveDismissDisabled(isHoldingMic || speech.isRecording)
+        .onAppear { assistant.greet(in: context) }
         .task { await localModel.load() }
         .onChange(of: localModel.isDownloaded) { _, isDownloaded in
             if isDownloaded { Task { await localModel.load() } }
@@ -316,7 +358,7 @@ private struct SmartAISettings: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Smart AI runs a small language model (Qwen3 1.7B) entirely on your iPhone, so it understands more flexible phrasing than basic mode. What you type never leaves your phone.")
+                    Text("Smart AI runs a small language model entirely on your iPhone, so it understands more flexible phrasing than basic mode. What you type never leaves your phone.")
                         .font(.callout)
                 }
 
@@ -356,5 +398,6 @@ private struct SmartAISettings: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .onDisappear { localModel.clearDownloadError() }
     }
 }

@@ -28,13 +28,24 @@ struct IncomeView: View {
             sort == .name ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.amount > $1.amount
         }
         let today = Calendar.current.startOfDay(for: .now)
-        // Coming payment dates, one timeline entry per day however many payments land on it.
-        let paymentDays = Dictionary(grouping: sortedPayments.flatMap { payment in
+        let payDayHorizon = Calendar.current.date(byAdding: .month, value: 3, to: today) ?? today
+        // Money coming in from pay days and expected payments, one timeline entry per day however much lands on it.
+        let incomeArrivals = sortedIncomes.flatMap { income in
+            income.payDates(through: payDayHorizon).map {
+                IncomeOnDay(day: Calendar.current.startOfDay(for: $0), name: income.name, amount: income.amount(inMonthOf: $0),
+                            detail: "Monthly income", income: income)
+            }
+        }
+        let paymentArrivals = sortedPayments.flatMap { payment in
             let dates = payment.paymentDates
             return dates.indices
                 .filter { Calendar.current.startOfDay(for: dates[$0]) >= today }
-                .map { PaymentOnDay(day: Calendar.current.startOfDay(for: dates[$0]), payment: payment, number: $0 + 1, count: dates.count) }
-        }, by: \.day).sorted { $0.key < $1.key }
+                .map {
+                    IncomeOnDay(day: Calendar.current.startOfDay(for: dates[$0]), name: payment.name, amount: payment.amount,
+                                detail: dates.count > 1 ? "Payment \($0 + 1) of \(dates.count)" : nil, payment: payment)
+                }
+        }
+        let paymentDays = Dictionary(grouping: incomeArrivals + paymentArrivals, by: \.day).sorted { $0.key < $1.key }
         let shownDays = Array(paymentDays.prefix(8))
         let sortMenu = Menu {
             Picker("Sort By", selection: $sort) {
@@ -81,6 +92,13 @@ struct IncomeView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(income.name)
+                                    if let payDay = income.payDay, let next = income.payDates(through: payDayHorizon).first {
+                                        let isToday = Calendar.current.isDateInToday(next)
+                                        Text((payDay == BudgetCategory.monthEnd ? "Paid at month end" : "Paid on day \(payDay)")
+                                             + " · " + (isToday ? "today" : "next \(next.formatted(.dateTime.month(.abbreviated).day()))"))
+                                            .font(.caption)
+                                            .foregroundStyle(isToday ? .green : .secondary)
+                                    }
                                     if linksExpenses {
                                         let left = income.remainingThisMonth
                                         Text("\(left.formatted(.currency(code: currencyCode))) left this month")
@@ -113,23 +131,25 @@ struct IncomeView: View {
                             let entries = group.value
                             TimelineDayRow(day: group.key, isFirst: index == 0, isLast: index == shownDays.count - 1, tint: .green) {
                                 if entries.count > 1 {
-                                    Text(entries.reduce(0) { $0 + $1.payment.amount }, format: .currency(code: currencyCode))
+                                    Text(entries.reduce(0) { $0 + $1.amount }, format: .currency(code: currencyCode))
                                         .foregroundStyle(.green)
                                 }
                             } content: {
                                 ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                                    Button { editingPayment = entry.payment } label: {
+                                    Button {
+                                        if let payment = entry.payment { editingPayment = payment } else { editing = entry.income }
+                                    } label: {
                                         HStack {
                                             VStack(alignment: .leading, spacing: 2) {
-                                                Text(entry.payment.name)
-                                                if entry.count > 1 {
-                                                    Text("Payment \(entry.number) of \(entry.count)")
+                                                Text(entry.name)
+                                                if let detail = entry.detail {
+                                                    Text(detail)
                                                         .font(.caption)
                                                         .foregroundStyle(.secondary)
                                                 }
                                             }
                                             Spacer()
-                                            Text(entry.payment.amount, format: .currency(code: currencyCode))
+                                            Text(entry.amount, format: .currency(code: currencyCode))
                                                 .monospacedDigit()
                                                 .foregroundStyle(entries.count > 1 ? .secondary : Color.green)
                                         }
@@ -143,7 +163,7 @@ struct IncomeView: View {
                         Text("Coming Up")
                     } footer: {
                         if paymentDays.count > shownDays.count {
-                            Text("Showing the next \(shownDays.count) payment days.")
+                            Text("Showing the next \(shownDays.count) days with money coming in.")
                         }
                     }
                 }
@@ -170,21 +190,36 @@ struct IncomeView: View {
                         if !payments.isEmpty { sortMenu }
                     }
                 } footer: {
-                    Text("Money someone owes you or other temporary income, paid once or for a set time. Not counted in your monthly total.")
+                    Text("For money that comes in only a few times and then stops, like a friend paying back a loan in 3 installments, a one-time bonus, or a refund. Unlike your salary, it isn't counted in your monthly income.")
                 }
             }
             .navigationTitle("Income")
+            .collapsesTabBarOnScroll()
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search income")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { AssistantRouter.shared.isShowing = true } label: { AIIcon() }
-                        .accessibilityLabel("Assistant")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Menu("Add", systemImage: "plus") {
+            // From iOS 26 the add button sits beside the tab bar instead (see RootView).
+            .safeAreaInset(edge: .bottom, alignment: .trailing) {
+                if #available(iOS 26, *) {
+                } else {
+                    Menu {
                         Button("Monthly Income", systemImage: "banknote") { isAdding = true }
                         Button("Expected Payment", systemImage: "calendar.badge.plus") { isAddingPayment = true }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 56, height: 56)
+                            .background(Color.accentColor, in: Circle())
+                            .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                     }
+                    .accessibilityLabel("Add Income")
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 12)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { AssistantRouter.shared.isShowing = true } label: { AIIcon() }
+                        .accessibilityLabel("Assistant")
                 }
             }
             .sheet(isPresented: $isAdding) { IncomeEditor(income: nil) }
@@ -195,21 +230,28 @@ struct IncomeView: View {
     }
 }
 
-private struct PaymentOnDay {
+/// Money arriving on one day: a monthly income's pay day or one of an expected payment's dates.
+private struct IncomeOnDay {
     let day: Date
-    let payment: ExpectedPayment
-    /// Which payment this is, like 2 of 6.
-    let number: Int
-    let count: Int
+    let name: String
+    let amount: Decimal
+    /// Like "Monthly income" or "Payment 2 of 6".
+    let detail: String?
+    var income: IncomeSource?
+    var payment: ExpectedPayment?
 }
 
-private struct IncomeEditor: View {
+struct IncomeEditor: View {
     let income: IncomeSource?
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var amount: Decimal?
+    @State private var hasPayDay = false
+    /// False once the user cancels a change scheduled for a later month; cleared on Save.
+    @State private var keepsScheduledChange = true
+    @State private var payDay = 15
 
     var body: some View {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
@@ -226,6 +268,22 @@ private struct IncomeEditor: View {
                             .foregroundStyle(.secondary)
                         MoneyField(value: $amount)
                     }
+                    if keepsScheduledChange, let income, let newAmount = income.scheduledAmount, let month = income.scheduledAmountMonth {
+                        ScheduledChangeRow(amount: newAmount, month: month) { keepsScheduledChange = false }
+                    }
+                }
+                Section {
+                    Toggle("Has a Pay Day", isOn: $hasPayDay.animation())
+                    if hasPayDay {
+                        Picker("Paid Every Month On", selection: $payDay) {
+                            ForEach(1...31, id: \.self) { Text("Day \($0)") }
+                            Text("Month End").tag(BudgetCategory.monthEnd)
+                        }
+                    }
+                } footer: {
+                    Text(hasPayDay
+                         ? "Shows in Upcoming and Coming Up so you know when it arrives. In shorter months, days past the end fall on the last day."
+                         : "Optional. Set the day it usually arrives to see it coming in Upcoming.")
                 }
                 if let income {
                     Section {
@@ -245,12 +303,15 @@ private struct IncomeEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         guard let amount else { return }
-                        if let income {
-                            income.name = trimmedName
-                            income.amount = amount
-                        } else {
-                            context.insert(IncomeSource(name: trimmedName, amount: amount))
+                        let target = income ?? IncomeSource(name: trimmedName, amount: amount)
+                        target.name = trimmedName
+                        target.amount = amount
+                        target.payDay = hasPayDay ? payDay : nil
+                        if !keepsScheduledChange {
+                            target.scheduledAmount = nil
+                            target.scheduledAmountMonth = nil
                         }
+                        if income == nil { context.insert(target) }
                         dismiss()
                     }
                     .disabled(trimmedName.isEmpty || amount == nil || amount! < 0)
@@ -260,9 +321,34 @@ private struct IncomeEditor: View {
                 guard let income else { return }
                 name = income.name
                 amount = income.amount
+                hasPayDay = income.payDay != nil
+                payDay = income.payDay ?? payDay
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// A new amount set to take over in a later month, like "₱6,000 from November", with a way to cancel it.
+struct ScheduledChangeRow: View {
+    let amount: Decimal
+    let month: Date
+    let onCancel: () -> Void
+
+    var body: some View {
+        let isThisYear = Calendar.current.isDate(month, equalTo: .now, toGranularity: .year)
+        HStack {
+            Label {
+                Text("Changes to \(amount.formatted(.currency(code: currencyCode))) from \(month.formatted(isThisYear ? .dateTime.month(.wide) : .dateTime.month(.wide).year()))")
+            } icon: {
+                Image(systemName: "calendar.badge.clock").foregroundStyle(Color.accentColor)
+            }
+            .font(.subheadline)
+            Spacer()
+            Button("Cancel Change", role: .destructive, action: onCancel)
+                .font(.subheadline)
+                .buttonStyle(.borderless)
+        }
     }
 }
 
@@ -298,7 +384,7 @@ private struct ExpectedPaymentRow: View {
     }
 }
 
-private struct ExpectedPaymentEditor: View {
+struct ExpectedPaymentEditor: View {
     let payment: ExpectedPayment?
 
     @Environment(\.modelContext) private var context
@@ -315,9 +401,15 @@ private struct ExpectedPaymentEditor: View {
 
         NavigationStack {
             Form {
-                Section("From") {
+                Section {
                     TextField("Who or what (e.g. Juan – loan)", text: $name)
                         .textInputAutocapitalization(.words)
+                } header: {
+                    Text("From")
+                } footer: {
+                    if payment == nil {
+                        Text("Use this for money that comes in a set number of times and then ends, like a friend paying you back monthly for 3 months. For money that keeps coming every month, like your salary, add a Monthly Income instead.")
+                    }
                 }
 
                 Section("Amount per Payment") {
@@ -330,7 +422,7 @@ private struct ExpectedPaymentEditor: View {
 
                 Section {
                     Picker("Repeats", selection: $frequency.animation()) {
-                        ForEach(Frequency.allCases, id: \.self) { Text($0.rawValue) }
+                        ForEach(Frequency.allCases, id: \.self) { Text($0 == .biweekly ? "2 Weeks" : $0.rawValue) }
                     }
                     .pickerStyle(.segmented)
                     DatePicker(frequency == .once ? "Date" : "Starts", selection: $startDate, displayedComponents: .date)

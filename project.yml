@@ -1,6 +1,6 @@
 name: Moneytor
 options:
-  bundleIdPrefix: com.moneytor
+  bundleIdPrefix: com.tan.moneytor
   deploymentTarget:
     iOS: "17.0"
 packages:
@@ -17,8 +17,20 @@ targets:
   Moneytor:
     type: application
     platform: iOS
-    sources: [Moneytor]
+    sources: [Moneytor, Shared]
+    entitlements:
+      path: Moneytor/Moneytor.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.tan.moneytor.app]
+    info:
+      path: Moneytor/Info.plist
+      properties:
+        # Lets the widget's Pay and Upcoming links open the app.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.tan.moneytor.app
+            CFBundleURLSchemes: [moneytor]
     dependencies:
+      - target: MoneytorWidget
       - package: MLXSwiftLM
         product: MLXLLM
       - package: MLXSwiftLM
@@ -29,12 +41,13 @@ targets:
         product: Tokenizers
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.moneytor.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.tan.moneytor.app
         SWIFT_VERSION: "5.0"
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 9P2K2679GT
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Moneytor
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -44,3 +57,28 @@ targets:
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Moneytor turns what you say into text so the assistant can log it.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  MoneytorWidget:
+    type: app-extension
+    platform: iOS
+    sources: [MoneytorWidget, Shared]
+    entitlements:
+      path: MoneytorWidget/MoneytorWidget.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.tan.moneytor.app]
+    info:
+      path: MoneytorWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Moneytor
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tan.moneytor.app.widget
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 9P2K2679GT
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES

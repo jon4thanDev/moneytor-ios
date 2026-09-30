@@ -10,10 +10,15 @@ struct CategoryEditor: View {
     /// Optional specific for categories like Subscriptions, saved as "Subscriptions (Netflix)".
     @State private var detail = ""
     @State private var limit: Decimal?
+    /// The icon the user picked; nil means it follows the name.
     @State private var icon: String?
+    @State private var isPickingIcon = false
     @State private var hasDueDate = false
-    @State private var dueDay = 1
+    /// Days of the month a monthly bill is due; `BudgetCategory.monthEnd` for the last day.
+    @State private var dueDays: Set<Int> = [1]
     @State private var isCustomSchedule = false
+    /// False once the user cancels a limit change scheduled for a later month; cleared on Save.
+    @State private var keepsScheduledChange = true
     @State private var frequency: Frequency = .monthly
     @State private var startDate = Date.now
     @State private var hasEndDate = false
@@ -73,50 +78,71 @@ struct CategoryEditor: View {
         let trimmedDetail = detail.trimmingCharacters(in: .whitespaces)
         let query = trimmedName.lowercased()
         let exactSuggestion = Self.suggestions.first { $0.name.lowercased() == query }
-        // With no name yet, suggest names that fit the chosen icon; otherwise match what's typed.
-        let matches: [Suggestion] = if query.isEmpty {
-            Self.suggestions.filter { $0.icon == icon }
-        } else if exactSuggestion != nil {
-            []
-        } else {
-            Array(Self.suggestions
-                .filter { $0.name.lowercased().contains(query) || $0.keywords.contains { $0.hasPrefix(query) } }
-                .sorted { $0.name.lowercased().hasPrefix(query) && !$1.name.lowercased().hasPrefix(query) }
-                .prefix(6))
-        }
+        let matches: [Suggestion] = query.isEmpty || exactSuggestion != nil ? [] : Array(Self.suggestions
+            .filter { $0.name.lowercased().contains(query) || $0.keywords.contains { $0.hasPrefix(query) } }
+            .sorted { $0.name.lowercased().hasPrefix(query) && !$1.name.lowercased().hasPrefix(query) }
+            .prefix(6))
         let showsDetail = exactSuggestion?.allowsDetail == true
         let fullName = showsDetail && !trimmedDetail.isEmpty ? "\(trimmedName) (\(trimmedDetail))" : trimmedName
+        let shownIcon = icon ?? exactSuggestion?.icon ?? matches.first?.icon ?? "tag.fill"
+        let repeats = isCustomSchedule ? frequency : .monthly
+        let isPerPayment = repeats == .monthly && hasDueDate && dueDays.count > 1
+        let pick = { (suggestion: Suggestion) in
+            name = suggestion.name
+            isDetailFocused = suggestion.allowsDetail
+        }
 
         NavigationStack {
             Form {
                 Section {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                        ForEach(Self.icons, id: \.self) { symbol in
-                            Image(systemName: symbol)
-                                .frame(width: 40, height: 40)
-                                .foregroundStyle(icon == symbol ? .white : .primary)
-                                .background(icon == symbol ? Color.accentColor : Color(.tertiarySystemFill),
-                                            in: RoundedRectangle(cornerRadius: 10))
-                                .onTapGesture { withAnimation { icon = symbol } }
+                    HStack(spacing: 12) {
+                        Button { isPickingIcon = true } label: {
+                            Image(systemName: shownIcon)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 11))
+                                .contentTransition(.symbolEffect(.replace))
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "pencil.circle.fill")
+                                        .font(.system(size: 17))
+                                        .symbolRenderingMode(.palette)
+                                        .foregroundStyle(.white, Color(.systemGray))
+                                        .offset(x: 5, y: 5)
+                                }
                         }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Change icon")
+                        TextField("Name (e.g. Groceries)", text: $name)
+                            .font(.title3)
+                            .textInputAutocapitalization(.words)
                     }
                     .padding(.vertical, 4)
-                } header: {
-                    Text("Icon")
-                } footer: {
-                    if icon == nil {
-                        Text("Choose an icon for this category.")
+                    if query.isEmpty && category == nil {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Self.suggestions.prefix(12), id: \.name) { suggestion in
+                                    Button { pick(suggestion) } label: {
+                                        Label {
+                                            Text(suggestion.name).foregroundStyle(.primary)
+                                        } icon: {
+                                            Image(systemName: suggestion.icon).foregroundStyle(Color.accentColor)
+                                        }
+                                        .font(.subheadline)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 7)
+                                        .background(Color(.tertiarySystemFill), in: Capsule())
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+                        .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0))
                     }
-                }
-
-                Section {
-                    TextField("Name (e.g. Groceries)", text: $name)
-                        .textInputAutocapitalization(.words)
                     ForEach(matches, id: \.name) { suggestion in
                         Button {
-                            name = suggestion.name
-                            icon = suggestion.icon
-                            isDetailFocused = suggestion.allowsDetail
+                            pick(suggestion)
                         } label: {
                             Label {
                                 Text(suggestion.name)
@@ -139,6 +165,8 @@ struct CategoryEditor: View {
                         Text(trimmedDetail.isEmpty
                             ? "Leave blank to keep it general, or name one to track it on its own."
                             : "Saved as “\(fullName)”.")
+                    } else if icon == nil && category == nil {
+                        Text("The icon follows the name. Tap it to choose another.")
                     }
                 }
 
@@ -146,10 +174,18 @@ struct CategoryEditor: View {
                     HStack {
                         Text(Locale.current.currencySymbol ?? "$")
                             .foregroundStyle(.secondary)
-                        MoneyField(value: $limit)
+                        CalculatorField(value: $limit)
+                    }
+                    if keepsScheduledChange, let category, let newLimit = category.scheduledLimit, let month = category.scheduledLimitMonth {
+                        ScheduledChangeRow(amount: newLimit, month: month) { keepsScheduledChange = false }
                     }
                 } header: {
-                    Text("Expense Limit")
+                    Text(isPerPayment ? "Amount per Payment" : "Expense Limit")
+                } footer: {
+                    if isPerPayment {
+                        let perMonth = ((limit ?? 0) * Decimal(dueDays.count)).formatted(.currency(code: currencyCode))
+                        Text("Due \(dueDays.count) times a month, so \(perMonth) a month in total.")
+                    }
                 }
 
                 Section {
@@ -161,17 +197,17 @@ struct CategoryEditor: View {
                         }
                     } else {
                         Picker("Repeats", selection: $frequency.animation()) {
-                            ForEach(Frequency.allCases, id: \.self) { Text($0.rawValue) }
+                            ForEach(Frequency.allCases, id: \.self) { Text($0 == .biweekly ? "2 Weeks" : $0.rawValue) }
                         }
                         .pickerStyle(.segmented)
-                        DatePicker("Starts", selection: $startDate, displayedComponents: .date)
+                        DatePicker(frequency == .once ? "Date" : "Starts", selection: $startDate, displayedComponents: .date)
                             .closesWhenPicked(startDate)
                         if frequency != .once {
                             Toggle("Has an End Date", isOn: $hasEndDate.animation())
-                        }
-                        if frequency == .once || hasEndDate {
-                            DatePicker("Ends", selection: $endDate, in: startDate..., displayedComponents: .date)
-                                .closesWhenPicked(endDate)
+                            if hasEndDate {
+                                DatePicker("Ends", selection: $endDate, in: startDate..., displayedComponents: .date)
+                                    .closesWhenPicked(endDate)
+                            }
                         }
                         Button("Remove Custom Schedule", role: .destructive) {
                             withAnimation { isCustomSchedule = false }
@@ -183,30 +219,61 @@ struct CategoryEditor: View {
                     let until = hasEndDate ? " until \(endDate.formatted(.dateTime.month(.abbreviated).day()))" : ""
                     switch isCustomSchedule ? frequency : .monthly {
                     case .once:
-                        Text("One limit for everything from \(startDate.formatted(.dateTime.month(.abbreviated).day())) to \(endDate.formatted(.dateTime.month(.abbreviated).day())). It doesn't reset.")
+                        Text("A one-time limit just for \(startDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())). It doesn't reset.")
                     case .daily:
                         Text("Resets every day\(until).")
                     case .weekly:
                         Text("Resets every week\(until).")
+                    case .biweekly:
+                        Text("Resets every 2 weeks, counting from \(startDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))\(until).")
                     case .monthly where !isCustomSchedule:
-                        Text("Resets on the 1st of every month. Tap Custom for a one-time, daily, or weekly limit, or to set start and end dates.")
+                        Text("Resets on the 1st of every month. Tap Custom for a one-time, daily, weekly, or every-2-weeks limit, or to set start and end dates.")
                     case .monthly:
                         Text("Resets on the 1st of every month\(until).")
                     }
                 }
 
-                if !isCustomSchedule || frequency == .monthly {
+                if repeats == .monthly || repeats == .biweekly {
                     Section {
                         Toggle("Has a Due Date", isOn: $hasDueDate.animation())
-                        if hasDueDate {
-                            Picker("Due Every Month On", selection: $dueDay) {
-                                ForEach(1...31, id: \.self) { Text("Day \($0)") }
+                        if hasDueDate && repeats == .monthly {
+                            // Like the Calendar app's monthly repeat: tap every day it's due, or End for the last day.
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 6) {
+                                ForEach(Array(1...31) + [BudgetCategory.monthEnd], id: \.self) { day in
+                                    let isOn = dueDays.contains(day)
+                                    let isMonthEnd = day == BudgetCategory.monthEnd
+                                    Button {
+                                        if isOn { dueDays.remove(day) } else { dueDays.insert(day) }
+                                    } label: {
+                                        Text(isMonthEnd ? "End" : "\(day)")
+                                            .font(.subheadline.weight(isOn ? .semibold : .regular))
+                                            .monospacedDigit()
+                                            .foregroundStyle(isOn ? .white : isMonthEnd ? Color.accentColor : .primary)
+                                            .frame(width: 36, height: 36)
+                                            .background(isOn ? Color.accentColor : Color.clear, in: Circle())
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel(isMonthEnd ? "Last day of the month" : "Day \(day)")
+                                    .accessibilityAddTraits(isOn ? .isSelected : [])
+                                }
                             }
+                            .padding(.vertical, 4)
+                            .animation(.snappy, value: dueDays)
                         }
+                    } header: {
+                        if hasDueDate && repeats == .monthly { Text("Due Every Month On") }
                     } footer: {
-                        Text(hasDueDate
-                            ? "Shows in Upcoming until you've logged the full limit for the month. In shorter months, days past the end fall on the last day."
-                            : "Turn on for bills like rent, electricity, or subscriptions to see them in Upcoming.")
+                        let upcoming = "Each due date shows in Upcoming until it's paid."
+                        if !hasDueDate {
+                            Text("Turn on for bills like rent, electricity, or subscriptions to see them in Upcoming.")
+                        } else if repeats == .biweekly {
+                            Text("Due every other \(startDate.formatted(.dateTime.weekday(.wide))), starting \(startDate.formatted(.dateTime.month(.abbreviated).day())). Change Starts to move it. \(upcoming)")
+                        } else if dueDays.isEmpty {
+                            Text("Pick at least one day, or End for the last day of every month.")
+                        } else {
+                            Text("Due on the \(BudgetCategory.describe(dueDays: Array(dueDays))) of every month. \(upcoming)"
+                                 + (dueDays.contains { (29...31).contains($0) } ? " In shorter months, days past the end fall on the last day." : ""))
+                        }
                     }
                 }
 
@@ -221,8 +288,11 @@ struct CategoryEditor: View {
                     ExpenseHistory(category: category)
                 }
             }
-            .navigationTitle(category == nil ? "New Category" : "Edit Limit")
+            .navigationTitle(category == nil ? "New Category" : "Edit Category")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $isPickingIcon) {
+                IconPicker(selection: shownIcon) { icon = $0 }
+            }
             .onChange(of: startDate) { _, newStart in
                 if endDate < newStart { endDate = newStart }
             }
@@ -232,20 +302,24 @@ struct CategoryEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        guard let limit, let icon else { return }
-                        let target = category ?? BudgetCategory(name: fullName, icon: icon, limit: limit)
+                        guard let limit else { return }
+                        let target = category ?? BudgetCategory(name: fullName, icon: shownIcon, limit: limit)
                         target.name = fullName
                         target.limit = limit
-                        target.icon = icon
-                        let repeats = isCustomSchedule ? frequency : .monthly
-                        target.dueDay = repeats == .monthly && hasDueDate ? dueDay : nil
+                        target.icon = shownIcon
+                        target.dueDays = !hasDueDate ? [] : repeats == .monthly ? Array(dueDays) : repeats == .biweekly ? [1] : []
                         target.frequency = repeats
                         target.startDate = isCustomSchedule ? startDate : nil
-                        target.endDate = isCustomSchedule && (repeats == .once || hasEndDate) ? endDate : nil
+                        // A one-time limit covers a single day, so it ends the day it starts.
+                        target.endDate = !isCustomSchedule ? nil : repeats == .once ? startDate : hasEndDate ? endDate : nil
+                        if !keepsScheduledChange {
+                            target.scheduledLimit = nil
+                            target.scheduledLimitMonth = nil
+                        }
                         if category == nil { context.insert(target) }
                         dismiss()
                     }
-                    .disabled(icon == nil || trimmedName.isEmpty || limit == nil || limit! < 0)
+                    .disabled(trimmedName.isEmpty || limit == nil || limit! < 0 || (hasDueDate && repeats == .monthly && dueDays.isEmpty))
                 }
             }
             .onAppear {
@@ -254,10 +328,10 @@ struct CategoryEditor: View {
                 limit = category.limit
                 icon = category.icon
                 hasDueDate = category.dueDay != nil
-                dueDay = category.dueDay ?? 1
+                dueDays = category.frequency == .monthly && !category.dueDays.isEmpty ? Set(category.dueDays) : [1]
                 frequency = category.frequency
                 startDate = category.starts
-                hasEndDate = category.endDate != nil
+                hasEndDate = category.frequency != .once && category.endDate != nil
                 endDate = category.endDate ?? endDate
                 // A plain monthly limit that started when it was created has nothing custom to show.
                 isCustomSchedule = category.frequency != .monthly || category.endDate != nil
@@ -269,6 +343,45 @@ struct CategoryEditor: View {
                     detail = String(match.output.2)
                 }
             }
+        }
+    }
+
+    /// A compact grid of icons in a half-height sheet; picking one closes it.
+    private struct IconPicker: View {
+        let selection: String
+        let onPick: (String) -> Void
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            NavigationStack {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 12)], spacing: 12) {
+                        ForEach(CategoryEditor.icons, id: \.self) { symbol in
+                            Button {
+                                onPick(symbol)
+                                dismiss()
+                            } label: {
+                                Image(systemName: symbol)
+                                    .font(.title3)
+                                    .frame(width: 48, height: 48)
+                                    .foregroundStyle(selection == symbol ? .white : .primary)
+                                    .background(selection == symbol ? Color.accentColor : Color(.tertiarySystemFill),
+                                                in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding()
+                }
+                .navigationTitle("Choose Icon")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
         }
     }
 }

@@ -13,22 +13,21 @@ enum BillReminders {
         let today = calendar.startOfDay(for: .now)
         var dueCount = 0
         let requests = categories.compactMap { category -> UNNotificationRequest? in
-            guard let due = category.unpaidDueDate else { return nil }
+            guard let (due, amount) = category.unpaidDue else { return nil }
             let isDue = calendar.startOfDay(for: due) <= today
             if isDue { dueCount += 1 }
 
             let content = UNMutableNotificationContent()
             // Due and overdue reminders repeat daily, so their wording has to stay true on later days.
             content.title = isDue ? "\(category.name) isn't paid yet" : "\(category.name) is due today"
-            content.body = "Due \(due.formatted(.dateTime.month(.abbreviated).day())) · \(category.remainingThisPeriod.formatted(.currency(code: currencyCode))) left to pay. Tap to pay it."
+            content.body = "Due \(due.formatted(.dateTime.month(.abbreviated).day())) · \(amount.formatted(.currency(code: currencyCode))) left to pay. Tap to pay it."
             content.sound = .default
             content.threadIdentifier = "bills"
 
             var components = isDue ? DateComponents() : calendar.dateComponents([.year, .month, .day], from: due)
             components.hour = 9
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: isDue)
-            let id = (try? JSONEncoder().encode(category.persistentModelID))?.base64EncodedString() ?? ""
-            return UNNotificationRequest(identifier: prefix + id, content: content, trigger: trigger)
+            return UNNotificationRequest(identifier: prefix + encode(category.persistentModelID), content: content, trigger: trigger)
         }
 
         Task {
@@ -51,7 +50,17 @@ enum BillReminders {
     }
 
     nonisolated static func categoryID(fromNotification identifier: String) -> PersistentIdentifier? {
-        guard identifier.hasPrefix(prefix), let data = Data(base64Encoded: String(identifier.dropFirst(prefix.count))) else { return nil }
+        guard identifier.hasPrefix(prefix) else { return nil }
+        return decode(String(identifier.dropFirst(prefix.count)))
+    }
+
+    /// A category's ID as text, for notification IDs and the widget's Pay links.
+    nonisolated static func encode(_ id: PersistentIdentifier) -> String {
+        (try? JSONEncoder().encode(id))?.base64EncodedString() ?? ""
+    }
+
+    nonisolated static func decode(_ text: String) -> PersistentIdentifier? {
+        guard let data = Data(base64Encoded: text) else { return nil }
         return try? JSONDecoder().decode(PersistentIdentifier.self, from: data)
     }
 }

@@ -6,6 +6,7 @@ struct UpcomingView: View {
     @Query(filter: #Predicate<BudgetCategory> { !$0.isArchived }, sort: \BudgetCategory.createdAt)
     private var categories: [BudgetCategory]
     @Query(sort: \ExpectedPayment.startDate) private var payments: [ExpectedPayment]
+    @Query(sort: \IncomeSource.createdAt) private var incomes: [IncomeSource]
     @State private var payingCategory: BudgetCategory?
     @State private var searchText = ""
 
@@ -26,19 +27,28 @@ struct UpcomingView: View {
         let today = calendar.startOfDay(for: .now)
         let horizon = calendar.date(byAdding: .day, value: 30, to: today) ?? today
 
-        let bills: [Item] = categories.compactMap { category in
-            guard category.frequency == .monthly, category.status == .active else { return nil }
-            // Once the month's limit is fully logged, the bill counts as paid and next month's due date shows instead.
-            let isPaid = category.limit > 0 && category.remainingThisPeriod <= 0
-            let month = isPaid ? calendar.date(byAdding: .month, value: 1, to: today) ?? today : today
-            guard let due = category.dueDate(inMonthOf: month), due <= horizon,
-                  category.endDate.map({ calendar.startOfDay(for: due) <= calendar.startOfDay(for: $0) }) ?? true
-            else { return nil }
-            return Item(date: due, title: category.name, icon: category.icon,
-                        amount: isPaid ? category.limit : category.remainingThisPeriod,
-                        isIncoming: false, note: isPaid ? "This month is paid" : nil, category: category)
+        let bills: [Item] = categories.flatMap { category in
+            let dues = category.unpaidDues(until: calendar.date(byAdding: .day, value: 1, to: horizon) ?? horizon)
+            return dues.map { due in
+                // "Payment 2 of 3 in October" for bills due several times a month.
+                var note: String?
+                if category.frequency == .monthly && category.dueDays.count > 1,
+                   let month = calendar.dateInterval(of: .month, for: due.date) {
+                    let monthDues = category.dueDates(in: month)
+                    if let index = monthDues.firstIndex(of: due.date) {
+                        note = "Payment \(index + 1) of \(monthDues.count) in \(due.date.formatted(.dateTime.month(.wide)))"
+                    }
+                } else if category.frequency == .biweekly {
+                    note = "Every 2 weeks"
+                }
+                return Item(date: due.date, title: category.name, icon: category.icon, amount: due.amount,
+                            isIncoming: false, note: note, category: category)
+            }
         }
-        let incoming: [Item] = payments.flatMap { payment in
+        let incoming: [Item] = incomes.flatMap { income in
+            income.payDates(through: horizon)
+                .map { Item(date: $0, title: income.name, icon: "banknote.fill", amount: income.amount(inMonthOf: $0), isIncoming: true, note: "Monthly income") }
+        } + payments.flatMap { payment in
             payment.paymentDates
                 .filter { calendar.startOfDay(for: $0) >= today && $0 <= horizon }
                 .map { Item(date: $0, title: payment.name, icon: "arrow.down.circle.fill", amount: payment.amount, isIncoming: true) }
@@ -53,7 +63,9 @@ struct UpcomingView: View {
         let later = items.filter { calendar.startOfDay(for: $0.date) > weekEnd }
         // Same bills as the tab badge and reminders, regardless of search.
         let dueBills = categories
-            .compactMap { category in category.unpaidDueDate.map { (category: category, due: calendar.startOfDay(for: $0)) } }
+            .compactMap { category in
+                category.unpaidDue.map { (category: category, due: calendar.startOfDay(for: $0.date), amount: $0.amount) }
+            }
             .filter { $0.due <= today }
             .sorted { $0.due < $1.due }
 
@@ -85,7 +97,7 @@ struct UpcomingView: View {
                                             .foregroundStyle(tint)
                                     }
                                     Spacer()
-                                    Text(bill.category.remainingThisPeriod, format: .currency(code: currencyCode))
+                                    Text(bill.amount, format: .currency(code: currencyCode))
                                         .font(.subheadline.weight(.semibold))
                                         .monospacedDigit()
                                     Button("Pay") { payingCategory = bill.category }
@@ -123,7 +135,7 @@ struct UpcomingView: View {
                     ContentUnavailableView {
                         Label("Nothing Coming Up", systemImage: "calendar")
                     } description: {
-                        Text("Give a category a due date, or add an expected payment in the Income tab.")
+                        Text("Give a category a due date, or set a pay day or add an expected payment in the Income tab.")
                     }
                 }
                 if !overdue.isEmpty {
@@ -137,6 +149,7 @@ struct UpcomingView: View {
                 }
             }
             .navigationTitle("Upcoming")
+            .collapsesTabBarOnScroll()
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search bills and payments")
             .sheet(item: $payingCategory) { PayBillSheet(category: $0) }
         }
@@ -285,7 +298,7 @@ private struct PayBillSheet: View {
                 }
             }
             .onAppear {
-                amount = max(category.remainingThisPeriod, 0)
+                amount = max(category.unpaidDue?.amount ?? category.remainingThisPeriod, 0)
                 paidFrom = salary
             }
         }

@@ -50,6 +50,12 @@ final class LocalModel {
         downloadTask?.cancel()
     }
 
+    /// Forgets a failed or cancelled download once its message has been seen. A load error stays,
+    /// since the assistant points to it with "Tap for details".
+    func clearDownloadError() {
+        if !isDownloaded { errorMessage = nil }
+    }
+
     func load() async {
         guard container == nil, !isLoading, let directory = localSnapshot() else { return }
         isLoading = true

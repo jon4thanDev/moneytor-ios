@@ -12,6 +12,8 @@ struct Interpretation: Decodable {
         case whatIf = "whatif"
         /// Plain arithmetic, like "what's 1500 minus 320?"
         case calculate
+        /// Changing a category's limit or an income's amount or name, like "change rent to 6000 next month".
+        case edit
         case other = "none"
     }
 
@@ -37,6 +39,12 @@ struct Interpretation: Decodable {
     var total: Total?
     /// Names to leave out of the total, from "except for Daily Food".
     var excluded: [String]?
+    /// Months from this one, from "next month" (1), "the month after next" (2), or "from November".
+    var monthsAhead: Int?
+    /// A new name, from "rename Food to Groceries".
+    var newName: String?
+    /// How much to raise (positive) or lower (negative) an amount, from "increase rent by 500".
+    var amountChange: Decimal?
 }
 
 /// Rule-based understanding of short English budgeting messages, e.g. "spent 200 on lunch yesterday".
@@ -56,6 +64,10 @@ enum CommandParser {
                                                  "create", "record", "set", "up", "called", "named", "as", "with",
                                                  "amount", "value", "an", "source"]
     private static let weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+    private static let editWords = ["change", "edit", "update", "rename", "set", "adjust", "modify",
+                                    "increase", "decrease", "raise", "lower", "reduce", "cut", "bump"]
+    private static let monthNames = ["january", "february", "march", "april", "may", "june",
+                                     "july", "august", "september", "october", "november", "december"]
     /// Subjects the assistant can't help with. Only checked when a message has nothing budget-related in it,
     /// so "spent 500 on school" still logs. Most specific first.
     private static let offTopics: [(name: String, keywords: [String])] = [
@@ -93,6 +105,45 @@ enum CommandParser {
         "date": ["date night"],
     ]
 
+    /// Keyboard mashing like "aihjsdasdj" or "sdfghj": no numbers, and every word has a run of consonants,
+    /// no vowels, or one letter held down. The user's own names never count, however they're spelled.
+    static func isGibberish(_ text: String, names: [String]) -> Bool {
+        let lower = text.lowercased()
+        guard !lower.contains(where: \.isNumber) else { return false }
+        let nameWords = Set(names.flatMap { $0.lowercased().split(whereSeparator: { !$0.isLetter }) })
+        let words = lower.split(whereSeparator: { !$0.isLetter }).filter { !nameWords.contains($0) }
+        return !words.isEmpty && words.allSatisfy { word in
+            guard word.count >= 4 else { return false }
+            let vowels = "aeiouy"
+            var longestRun = 0
+            var run = 0
+            // Pairs like "th" and "ng" are one sound, so "strength" doesn't count as a run of four.
+            for letter in word.replacingOccurrences(of: "th|ch|sh|ph|ng|ck|gh|wh", with: "x", options: .regularExpression) {
+                run = vowels.contains(letter) ? 0 : run + 1
+                longestRun = max(longestRun, run)
+            }
+            return longestRun >= 4 || !word.contains(where: vowels.contains) || word.range(of: #"(.)\1{3}"#, options: .regularExpression) != nil
+        }
+    }
+
+    /// Letters to add, remove, change, or swap with a neighbour to turn one word into the other.
+    private static func editDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a), b = Array(b)
+        guard !a.isEmpty, !b.isEmpty else { return max(a.count, b.count) }
+        var d = [[Int]](repeating: [Int](repeating: 0, count: b.count + 1), count: a.count + 1)
+        for i in 0...a.count { d[i][0] = i }
+        for j in 0...b.count { d[0][j] = j }
+        for i in 1...a.count {
+            for j in 1...b.count {
+                d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1))
+                if i > 1, j > 1, a[i - 1] == b[j - 2], a[i - 2] == b[j - 1] {
+                    d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+                }
+            }
+        }
+        return d[a.count][b.count]
+    }
+
     static func parse(_ text: String, categoryNames: [String], incomeNames: [String] = []) -> Interpretation {
         let lower = text.lowercased()
         func mentions(_ phrases: [String]) -> Bool {
@@ -110,6 +161,50 @@ enum CommandParser {
            let number = Int(match.output.1) {
             count = (number, match.output.2.lowercased())
             rest.replaceSubrange(match.range, with: " ")
+        }
+
+        // The month a change starts. Taken out before amounts so the 3 in "in 3 months" isn't read as one.
+        let calendar = Calendar.current
+        let relativeMonths: [(pattern: String, months: Int)] = [
+            (#"\b(?:the\s+)?month\s+after\s+next\b|\bnext\s+next\s+month\b"#, 2),
+            (#"\bnext\s+month\b"#, 1),
+            (#"\bthis\s+month\b|\bright\s+now\b"#, 0),
+            (#"\b(?:last|previous)\s+month\b"#, -1),
+        ]
+        for (pattern, months) in relativeMonths {
+            if let range = rest.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+                result.monthsAhead = months
+                rest.replaceSubrange(range, with: " ")
+                break
+            }
+        }
+        if result.monthsAhead == nil, let match = rest.firstMatch(of: #/\bin\s+(\d+)\s+months?\b|\b(\d+)\s+months?\s+from\s+now\b/#.ignoresCase()),
+           let months = Int(match.output.1 ?? match.output.2 ?? "") {
+            result.monthsAhead = months
+            rest.replaceSubrange(match.range, with: " ")
+        }
+        // "from November", "starting jan 2027": only after a word like "from", since "may" is also an everyday word.
+        if result.monthsAhead == nil,
+           let match = rest.firstMatch(of: #/\b(?:from|starting|start|beginning|effective|in|on|for|by)\s+(?:(?:in|on)\s+)?(?:the\s+month\s+of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b(?:\s+(\d{4}))?/#.ignoresCase()),
+           let index = monthNames.firstIndex(where: { $0.hasPrefix(match.output.1.lowercased().prefix(3)) }) {
+            let thisMonth = calendar.component(.month, from: .now)
+            if let year = match.output.2.flatMap({ Int($0) }) {
+                result.monthsAhead = (year - calendar.component(.year, from: .now)) * 12 + index + 1 - thisMonth
+            } else {
+                result.monthsAhead = (index + 1 - thisMonth + 12) % 12
+            }
+            rest.replaceSubrange(match.range, with: " ")
+        }
+
+        // "rename Food to Groceries": taken out before names are matched, in case the new name is one of them.
+        let isEditRequest = mentions(editWords) && !isHypothetical
+        if isEditRequest, mentions(["rename", "name"]),
+           let match = rest.firstMatch(of: #/\b(?:to|as|into)\s+["“']?([^"”']+?)["”']?\s*[.!?]*\s*$/#.ignoresCase()) {
+            let name = String(match.output.1).trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty {
+                result.newName = name == name.lowercased() ? name.capitalized : name
+                rest.replaceSubrange(match.range, with: " ")
+            }
         }
 
         // "150 + 200", "3 x 500", "1.5k minus 300": worked out into one amount, keeping the working to show.
@@ -154,6 +249,17 @@ enum CommandParser {
             if match.output.2 != nil { amount *= 1000 }
             result.amount = amount
             rest.replaceSubrange(match.range, with: " ")
+        }
+
+        // "increase rent by 500", "lower food by 1k": a change to the current amount rather than a new one.
+        if isEditRequest, let amount = result.amount, mentions(["by"]) {
+            if mentions(["increase", "raise", "bump", "up", "more", "add"]) {
+                result.amountChange = amount
+                result.amount = nil
+            } else if mentions(["decrease", "lower", "reduce", "cut", "down", "less"]) {
+                result.amountChange = -amount
+                result.amount = nil
+            }
         }
 
         // "200 a day" in a what-if: for the stated time, or for the rest of this month.
@@ -266,6 +372,20 @@ enum CommandParser {
             }
             result.categoryMatches = categoryNames.filter(partlyMentioned)
             result.incomeMatches = incomeNames.filter(partlyMentioned)
+            // A misspelled name, like "fod" or "grocries", gets a "Did you mean Food?" too. Same first letter,
+            // so everyday words like "went" aren't read as "Rent".
+            if result.categoryMatches?.isEmpty == true && result.incomeMatches?.isEmpty == true {
+                let words = lower.split(whereSeparator: { !$0.isLetter }).filter { $0.count >= 3 }
+                let misspelled = { (name: String) in
+                    name.lowercased().split(whereSeparator: { !$0.isLetter }).contains { part in
+                        part.count >= 3 && words.contains { word in
+                            word.first == part.first && editDistance(String(word), String(part)) <= (part.count <= 5 ? 1 : 2)
+                        }
+                    }
+                }
+                result.categoryMatches = categoryNames.filter(misspelled)
+                result.incomeMatches = incomeNames.filter(misspelled)
+            }
         }
 
         let hasDetails = result.amount != nil || result.category != nil
@@ -291,7 +411,13 @@ enum CommandParser {
             excluded.isEmpty ? nil : .left
         }
 
-        if isHypothetical && result.amount != nil {
+        // "Change rent to 6000", "rename food to groceries", "set my salary to 30k from November".
+        let namesTarget = result.category != nil || result.income != nil
+            || !(result.categoryMatches ?? []).isEmpty || !(result.incomeMatches ?? []).isEmpty
+        if isEditRequest && (namesTarget || result.newName != nil
+                             || mentions(["limit", "budget", "income", "salary", "category", "expense", "amount", "name"])) {
+            result.intent = .edit
+        } else if isHypothetical && result.amount != nil {
             result.intent = .whatIf
         } else if result.working != nil && result.category == nil && !mentions(spendWords + incomeWords + ["salary"]) {
             result.intent = .calculate
@@ -365,9 +491,8 @@ final class Assistant {
         var date: Date { Calendar.current.date(byAdding: .day, value: -max(daysAgo, 0), to: .now) ?? .now }
     }
 
-    private(set) var messages = [
-        Message(fromUser: false, text: "Hi! Tell me an expense or income, or ask how much is left. For example: “Food expense 200 yesterday”."),
-    ]
+    /// Starts with a greeting from `greet(in:)`.
+    private(set) var messages: [Message] = []
     private(set) var isThinking = false
     private var draft: Draft?
     private var awaitingConfirmation = false
@@ -383,6 +508,91 @@ final class Assistant {
     /// Waiting for the user to pick which name they meant; then `interpretation` carries on with it.
     private var clarification: (interpretation: Interpretation, choices: [Choice])?
 
+    /// A change to a category's limit or an income's amount or name, built up over a few messages.
+    private struct Edit {
+        var category: BudgetCategory?
+        var income: IncomeSource?
+        var amount: Decimal?
+        /// Added to the current amount instead of replacing it, from "increase rent by 500".
+        var change: Decimal?
+        var name: String?
+        /// Months from this one that a new amount starts; nil means this month.
+        var monthsAhead: Int?
+        var targetName: String? { category?.name ?? income?.name }
+    }
+    private var edit: Edit?
+    private enum EditQuestion { case target, value }
+    private var editQuestion: EditQuestion?
+
+    /// A different opening each time: a hello for the time of day, something about the budget right now,
+    /// and an example to try using the user's own category names.
+    func greet(in context: ModelContext) {
+        guard messages.isEmpty else { return }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let money = { (value: Decimal) in value.formatted(.currency(code: currencyCode)) }
+        let categories = (try? context.fetch(FetchDescriptor<BudgetCategory>(predicate: #Predicate { !$0.isArchived })))?
+            .filter { $0.status == .active } ?? []
+        let logs = (try? context.fetch(FetchDescriptor<SpendLog>())) ?? []
+
+        let hour = calendar.component(.hour, from: .now)
+        let timeOfDay = switch hour {
+        case 5..<12: "Good morning!"
+        case 12..<18: "Good afternoon!"
+        case 18..<22: "Good evening!"
+        default: "Still up?"
+        }
+        let opening = [timeOfDay, timeOfDay, "Hi there!", "Hey!", "Welcome back!"].randomElement() ?? timeOfDay
+
+        // Due bills always come first; otherwise one of a few things worth knowing today.
+        let dueBills = categories
+            .compactMap { category in category.unpaidDue.map { (category: category, due: $0) } }
+            .filter { calendar.startOfDay(for: $0.due.date) <= today }
+            .sorted { $0.due.date < $1.due.date }
+        var insight = ""
+        if let first = dueBills.first {
+            let isLate = calendar.startOfDay(for: first.due.date) < today
+            insight = dueBills.count == 1
+                ? "\(first.category.name) \(isLate ? "is overdue" : "is due today") (\(money(first.due.amount)))."
+                : "\(dueBills.count) bills need paying, starting with \(first.category.name)."
+        } else if !categories.isEmpty {
+            let left = categories.reduce(0) { $0 + $1.remainingThisMonth }
+            let spentToday = logs.filter { calendar.isDate($0.effectiveDate, inSameDayAs: .now) }.reduce(0) { $0 + $1.amount }
+            let daysLeft = (calendar.dateInterval(of: .month, for: .now)?.end)
+                .flatMap { calendar.dateComponents([.day], from: today, to: $0).day } ?? 0
+            var insights = [
+                left < 0 ? "You're \(money(-left)) over budget this month." : "You have \(money(left)) left in your budget this month.",
+                spentToday > 0 ? "You've logged \(money(spentToday)) in expenses today." : "Nothing logged yet today.",
+            ]
+            if daysLeft > 0 && left > 0 {
+                insights.append("That's about \(money(left / Decimal(daysLeft))) a day for the \(daysLeft) day\(daysLeft == 1 ? "" : "s") left this month.")
+            }
+            if let tightest = categories.filter({ $0.limit > 0 && $0.remainingThisPeriod > 0 })
+                .min(by: { $0.remainingThisPeriod / $0.availableThisPeriod < $1.remainingThisPeriod / $1.availableThisPeriod }),
+               tightest.remainingThisPeriod / tightest.availableThisPeriod < 0.3 {
+                insights.append("\(tightest.name) is running low, with \(money(tightest.remainingThisPeriod)) left \(tightest.periodName).")
+            }
+            insight = insights.randomElement() ?? ""
+        }
+
+        let name = categories.randomElement()?.name ?? "Food"
+        let example = [
+            "Try “\(name) 150” to log an expense.",
+            "Log something like “\(name) 200 yesterday”.",
+            "Ask me “How much is left for \(name)?”",
+            "Thinking of buying something? Ask “If I spend 500 on \(name), how much is left?”",
+            "Planning ahead? Try “Change \(name) to 3000 next month”.",
+            "Got paid? Try “Add salary 25k”.",
+        ].randomElement() ?? ""
+
+        var suggestions = ["How much is left?", "Log an expense"]
+        if let first = dueBills.first {
+            suggestions.insert("Log \(first.due.amount.formatted()) to \(first.category.name)", at: 0)
+        }
+        messages.append(Message(fromUser: false, text: [opening, insight, example].filter { !$0.isEmpty }.joined(separator: " "),
+                                suggestions: suggestions))
+    }
+
     func send(_ text: String, in context: ModelContext) async {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isThinking else { return }
@@ -397,7 +607,8 @@ final class Assistant {
 
         let rules = CommandParser.parse(text, categoryNames: names, incomeNames: incomes.map(\.name))
         var interpretation = rules
-        if LocalModel.shared.isReady {
+        let isGibberish = CommandParser.isGibberish(text, names: allCategories.map(\.name) + incomes.map(\.name))
+        if LocalModel.shared.isReady && !isGibberish {
             isThinking = true
             let ai = await LocalModel.shared.interpret(text, categories: names, lastQuestion: lastQuestion)
             isThinking = false
@@ -409,7 +620,7 @@ final class Assistant {
                 let rulesFoundBudget = rules.amount != nil || rules.category != nil || ![.other, .offTopic].contains(rules.intent)
                 let aiIntent = ai.intent == .offTopic && rulesFoundBudget ? .other : ai.intent ?? .other
                 // The rules do arithmetic exactly and never log a what-if, so they decide those.
-                let rulesDecide = [.whatIf, .calculate].contains(rules.intent) || rules.total != nil
+                let rulesDecide = [.whatIf, .calculate, .edit].contains(rules.intent) || rules.total != nil
                 // When a word only partly matches names, ask rather than let the model guess one.
                 let isAmbiguous = !(rules.categoryMatches ?? []).isEmpty || !(rules.incomeMatches ?? []).isEmpty
                 interpretation = Interpretation(
@@ -426,9 +637,41 @@ final class Assistant {
                     categoryMatches: rules.categoryMatches,
                     incomeMatches: rules.incomeMatches,
                     total: rules.total,
-                    excluded: rules.excluded
+                    excluded: rules.excluded,
+                    monthsAhead: rules.monthsAhead,
+                    newName: rules.newName,
+                    amountChange: rules.amountChange
                 )
             }
+        } else {
+            // The rules answer instantly; a short typing pause reads more like a conversation.
+            isThinking = true
+            try? await Task.sleep(for: .milliseconds(800))
+            isThinking = false
+        }
+        if isGibberish {
+            // Nothing in progress changes; whatever was just asked is asked again.
+            let quoted = text.count > 24 ? "that" : "“\(text)”"
+            let opener = [
+                "Hmm, I didn't catch \(quoted). Was that a typo?",
+                "Oops, \(quoted) looks like a typo.",
+                "Sorry, I couldn't make sense of \(quoted).",
+                "Looks like your fingers slipped there.",
+            ].randomElement() ?? ""
+            if let pending = clarification {
+                reply(opener)
+                askWhich(pending.choices, for: pending.interpretation)
+            } else if edit != nil {
+                reply(opener)
+                advanceEdit()
+            } else if draft != nil {
+                reply(opener)
+                advance(categories: categories)
+            } else {
+                reply("\(opener) You can log an expense like “Food 200”, add income, or ask how much is left.",
+                      suggestions: ["How much is left?", "Log an expense", "Add income"])
+            }
+            return
         }
         handle(interpretation, text: text, categories: categories, context: context)
     }
@@ -464,6 +707,39 @@ final class Assistant {
         // "150 + 200" while an amount is being asked for is the answer, not a question.
         if interpretation.intent == .calculate && draft != nil && draft?.amount == nil {
             interpretation.intent = .other
+        }
+
+        // "Change it to food" while an expense is being logged corrects that expense.
+        if interpretation.intent == .edit && draft != nil && interpretation.newName == nil && interpretation.monthsAhead == nil {
+            interpretation.intent = .other
+        }
+        if edit != nil {
+            switch interpretation.intent ?? .other {
+            case .cancel:
+                edit = nil
+                editQuestion = nil
+                awaitingConfirmation = false
+                reply("Okay, nothing changed.")
+                return
+            case .confirm where awaitingConfirmation:
+                applyEdit()
+                return
+            case .confirm, .other, .edit:
+                updateEdit(with: interpretation, text: text)
+                return
+            // An answer like "Salary" to "Which one do you want to change?" isn't adding income.
+            case _ where editQuestion != nil:
+                updateEdit(with: interpretation, text: text)
+                return
+            default:
+                // Moving on to something else, like logging an expense, drops the change.
+                edit = nil
+                editQuestion = nil
+                awaitingConfirmation = false
+            }
+        } else if interpretation.intent == .edit {
+            updateEdit(with: interpretation, text: text)
+            return
         }
 
         // Checked first because an answer like "Salary" would otherwise read as adding income.
@@ -549,14 +825,14 @@ final class Assistant {
             } else {
                 draft?.kind = kind
             }
-        case .confirm, .other:
+        case .confirm, .other, .edit:
             if draft != nil && interpretation.intent == .confirm {
                 advance(categories: categories)
                 return
             }
             if draft == nil {
                 guard interpretation.amount != nil else {
-                    reply("I can log expenses, add income, or tell you what's left. Try “Food expense 200”, “Add salary 25k”, or “How much is left?”")
+                    reply("I can log expenses, add income, change a limit or income, or tell you what's left. Try “Food expense 200”, “Add salary 25k”, “Change rent to 6000 next month”, or “How much is left?”")
                     return
                 }
                 draft = Draft()
@@ -679,13 +955,180 @@ final class Assistant {
         }
     }
 
+    /// Folds a message into the change being set up: a fresh request, or an answer to the last question.
+    private func updateEdit(with interpretation: Interpretation, text: String) {
+        let isNewRequest = interpretation.intent == .edit && editQuestion == nil
+        var current = isNewRequest ? Edit() : edit ?? Edit()
+        let findCategory = { (name: String) in self.matchCategory(name, in: self.allCategories) }
+        let findIncome = { (name: String) in self.incomes.first { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame } }
+
+        if editQuestion == .value && interpretation.amount == nil && interpretation.amountChange == nil
+            && interpretation.newName == nil && interpretation.monthsAhead == nil && interpretation.intent != .confirm {
+            // A bare reply like "Groceries" to "What should Food change to?" is the new name.
+            let name = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            current.name = name == name.lowercased() ? name.capitalized : name
+        } else {
+            if isNewRequest || editQuestion == .target {
+                if let category = interpretation.category.flatMap(findCategory)
+                    ?? allCategories.sorted(by: { $0.name.count > $1.name.count }).first(where: { text.localizedCaseInsensitiveContains($0.name) }) {
+                    current.category = category
+                    current.income = nil
+                } else if let income = interpretation.income.flatMap(findIncome)
+                            ?? incomes.sorted(by: { $0.name.count > $1.name.count }).first(where: { text.localizedCaseInsensitiveContains($0.name) }) {
+                    current.income = income
+                    current.category = nil
+                }
+            }
+            if let amount = interpretation.amount {
+                current.amount = amount
+                current.change = nil
+            }
+            if let change = interpretation.amountChange {
+                current.change = change
+                current.amount = nil
+            }
+            current.name = interpretation.newName ?? current.name
+            current.monthsAhead = interpretation.monthsAhead ?? current.monthsAhead
+        }
+
+        // A word that's only part of several names, like "daily", is asked about before going on.
+        if current.targetName == nil && isNewRequest {
+            let choices = (interpretation.categoryMatches ?? []).map { Choice(name: $0, isIncome: false) }
+                + (interpretation.incomeMatches ?? []).map { Choice(name: $0, isIncome: true) }
+            if !choices.isEmpty {
+                edit = nil
+                askWhich(choices, for: interpretation)
+                return
+            }
+        }
+        edit = current
+        advanceEdit()
+    }
+
+    /// Asks for whatever the change still needs, then for confirmation.
+    private func advanceEdit() {
+        guard var current = edit else { return }
+        let money = { (value: Decimal) in value.formatted(.currency(code: currencyCode)) }
+        awaitingConfirmation = false
+        editQuestion = nil
+
+        guard let targetName = current.targetName else {
+            editQuestion = .target
+            let names = allCategories.map(\.name) + incomes.map(\.name)
+            return reply(names.isEmpty ? "You don't have any categories or income to change yet." : "Which one do you want to change?",
+                         suggestions: names)
+        }
+        if let months = current.monthsAhead, months < 0 {
+            edit?.monthsAhead = nil
+            return reply("Past months keep what you spent then, so a change can only start this month or later. When should it start?",
+                         suggestions: ["This month", "Next month"])
+        }
+        guard current.amount != nil || current.change != nil || current.name != nil else {
+            editQuestion = .value
+            let noun = current.category != nil ? "limit" : "monthly amount"
+            return reply("What should \(targetName) change to? Tell me a new \(noun), like 6000, or a new name.")
+        }
+        if let name = current.name, name.localizedCaseInsensitiveCompare(targetName) != .orderedSame,
+           (allCategories.contains { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }
+            || incomes.contains { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+            edit?.name = nil
+            editQuestion = .value
+            return reply("You already have something called “\(name)”. What other name should \(targetName) have?")
+        }
+
+        let calendar = Calendar.current
+        let months = current.monthsAhead ?? 0
+        let thisMonth = calendar.dateInterval(of: .month, for: .now)?.start ?? .now
+        let month = calendar.date(byAdding: .month, value: months, to: thisMonth) ?? thisMonth
+        let monthName = month.formatted(calendar.isDate(month, equalTo: .now, toGranularity: .year)
+            ? .dateTime.month(.wide) : .dateTime.month(.wide).year())
+        let when = switch months {
+        case 0: "starting this month"
+        case 1: "starting next month (\(monthName))"
+        default: "starting \(monthName)"
+        }
+
+        var parts: [String] = []
+        if let name = current.name, name != targetName {
+            parts.append("rename \(targetName) to \(name)")
+        }
+        var suggestions = ["Confirm"]
+        if current.amount != nil || current.change != nil {
+            let old = current.category?.limitAmount(inMonthOf: month) ?? current.income?.amount(inMonthOf: month) ?? 0
+            let new = current.amount ?? old + (current.change ?? 0)
+            guard new >= 0 else {
+                edit?.change = nil
+                editQuestion = .value
+                return reply("That would take \(targetName) below zero, since it's \(money(old)) \(months == 0 ? "now" : "in \(monthName)"). What should it change to?")
+            }
+            current.amount = new
+            current.change = nil
+            edit = current
+            let what = current.category != nil ? "\(parts.isEmpty ? "\(targetName)’s" : "its") limit" : "\(parts.isEmpty ? targetName : "it")"
+            parts.append("change \(what) from \(money(old)) to \(money(new))\(current.income != nil ? " a month" : "") \(when)")
+            suggestions.append(months == 0 ? "From next month" : "This month instead")
+        }
+        suggestions.append("Cancel")
+
+        var notes: [String] = []
+        if current.name != nil && current.monthsAhead.map({ $0 > 0 }) == true && current.amount == nil {
+            notes.append("Names change right away rather than from a later month.")
+        }
+        let scheduledMonth = current.category?.scheduledLimitMonth ?? current.income?.scheduledAmountMonth
+        let scheduledAmount = current.category?.scheduledLimit ?? current.income?.scheduledAmount
+        if months > 0, current.amount != nil, let scheduledMonth, let scheduledAmount, scheduledMonth != month {
+            notes.append("This replaces the change to \(money(scheduledAmount)) planned for \(scheduledMonth.formatted(.dateTime.month(.wide))).")
+        }
+
+        let sentence = parts.joined(separator: " and ")
+        awaitingConfirmation = true
+        reply(([sentence.prefix(1).uppercased() + sentence.dropFirst() + "?"] + notes).joined(separator: " "), suggestions: suggestions)
+    }
+
+    private func applyEdit() {
+        guard let current = edit, let targetName = current.targetName else { return }
+        edit = nil
+        awaitingConfirmation = false
+        editQuestion = nil
+        let money = { (value: Decimal) in value.formatted(.currency(code: currencyCode)) }
+        let calendar = Calendar.current
+        let months = current.monthsAhead ?? 0
+        let thisMonth = calendar.dateInterval(of: .month, for: .now)?.start ?? .now
+        let month = calendar.date(byAdding: .month, value: months, to: thisMonth) ?? thisMonth
+
+        var done: [String] = []
+        if let name = current.name, name != targetName {
+            current.category?.name = name
+            current.income?.name = name
+            done.append("renamed \(targetName) to \(name)")
+        }
+        if let amount = current.amount {
+            let shownName = current.name ?? targetName
+            if months == 0 {
+                current.category?.limit = amount
+                current.income?.amount = amount
+                done.append("\(shownName) is now \(money(amount))\(current.income != nil ? " a month" : "")")
+            } else {
+                current.category?.scheduledLimit = amount
+                current.category?.scheduledLimitMonth = month
+                current.income?.scheduledAmount = amount
+                current.income?.scheduledAmountMonth = month
+                let monthName = month.formatted(calendar.isDate(month, equalTo: .now, toGranularity: .year)
+                    ? .dateTime.month(.wide) : .dateTime.month(.wide).year())
+                done.append("\(shownName) will be \(money(amount))\(current.income != nil ? " a month" : "") from \(monthName). Until then it stays as it is")
+            }
+        }
+        let sentence = done.joined(separator: ", and ")
+        reply("Done! " + sentence.prefix(1).uppercased() + sentence.dropFirst() + ".")
+    }
+
     private func summary(for categoryName: String?, categories: [BudgetCategory]) -> String {
         guard !categories.isEmpty else {
             return "You don't have any budget categories yet. Add one in the Budget tab first."
         }
         if let categoryName, let category = matchCategory(categoryName, in: categories) {
             let remaining = category.remainingThisPeriod
-            let limit = category.limit.formatted(.currency(code: currencyCode))
+            let limit = category.periodLimit.formatted(.currency(code: currencyCode))
             return remaining < 0
                 ? "\(category.name) is \((-remaining).formatted(.currency(code: currencyCode))) over its \(limit) limit \(category.periodName)."
                 : "You have \(remaining.formatted(.currency(code: currencyCode))) left in \(category.name) \(category.periodName) (\(category.spentThisPeriod.formatted(.currency(code: currencyCode))) of \(limit) used)."

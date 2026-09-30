@@ -59,13 +59,17 @@ struct CalculatorField: UIViewRepresentable {
     }
 
     func updateUIView(_ field: CalculatorTextField, context: Context) {
-        context.coordinator.parent = self
-        let model = context.coordinator.model
-        // Only an amount set from outside (like a prefilled bill) replaces what's typed.
-        if value != model.result {
-            model.expression = value.map { "\($0)" } ?? ""
-            field.text = model.displayText
-        }
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        // Only an amount set from outside (like a prefilled bill) replaces what's typed. Don't read the
+        // shared model here: SwiftUI would then re-run this on every key press, with `value` still
+        // holding the amount from before that key, and it would undo the key.
+        guard value != coordinator.sentValue else { return }
+        coordinator.sentValue = value
+        let incoming = CalculatorModel()
+        incoming.expression = value.map { "\($0)" } ?? ""
+        coordinator.model.expression = incoming.expression
+        field.text = incoming.displayText
     }
 
     @MainActor
@@ -74,6 +78,8 @@ struct CalculatorField: UIViewRepresentable {
         let model = CalculatorModel()
         weak var field: UITextField?
         var keypad: UIHostingController<CalculatorKeypad>?
+        /// The amount last handed to `value`, to tell an outside change from the field's own.
+        var sentValue: Decimal?
 
         init(_ parent: CalculatorField) {
             self.parent = parent
@@ -91,7 +97,8 @@ struct CalculatorField: UIViewRepresentable {
 
         private func sync() {
             field?.text = model.displayText
-            parent.value = model.result
+            sentValue = model.result
+            parent.value = sentValue
         }
 
         func textFieldDidEndEditing(_ textField: UITextField) {

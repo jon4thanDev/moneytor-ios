@@ -11,7 +11,7 @@ struct MoneytorApp: App {
             RootView()
                 .preferredColorScheme(appearance.colorScheme)
         }
-        .modelContainer(for: [BudgetCategory.self, SpendLog.self, IncomeSource.self, ExpectedPayment.self, Funding.self])
+        .modelContainer(for: [BudgetCategory.self, SpendLog.self, IncomeSource.self, ExpectedPayment.self, Funding.self, Transfer.self])
     }
 }
 
@@ -21,30 +21,34 @@ private struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Query(filter: #Predicate<BudgetCategory> { !$0.isArchived }) private var categories: [BudgetCategory]
     @Query private var logs: [SpendLog]
+    @Query private var incomes: [IncomeSource]
+    @Query private var payments: [ExpectedPayment]
     @State private var payingBill: BudgetCategory?
     /// Bills already opened in this run of reminders, so a partly paid one doesn't come back right away.
     @State private var shownBills: Set<PersistentIdentifier> = []
     @State private var didPay = false
+    @State private var tab: AppTab = .expenses
+    @State private var isAddingCategory = false
+    @State private var isChoosingIncome = false
+    @State private var isAddingIncome = false
+    @State private var isAddingPayment = false
+
+    private enum AppTab: Hashable {
+        case expenses, income, upcoming, settings
+        /// Not a page: selecting it adds income on the Income tab and a category anywhere else.
+        case add
+    }
 
     var body: some View {
-        TabView {
-            BudgetView()
-                // The wallet symbol only exists from iOS 18.
-                .tabItem { Label("Budget", systemImage: UIImage(systemName: "wallet.bifold") == nil ? "creditcard" : "wallet.bifold") }
-            IncomeView()
-                .tabItem { Label("Income", systemImage: "chart.line.uptrend.xyaxis") }
-            UpcomingView()
-                .tabItem { Label("Upcoming", systemImage: "calendar.badge.clock") }
-                // Same bills the reminders are about; zero hides the badge.
-                .badge(dueBills.count)
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
-        }
-        .background(TapOutsideDismissesKeyboard())
-        .sheet(isPresented: Bindable(AssistantRouter.shared).isShowing) { AssistantView() }
+        tabs
+            .background(TapOutsideDismissesKeyboard())
+            .sheet(isPresented: Bindable(AssistantRouter.shared).isShowing) { AssistantView() }
+            .sheet(isPresented: $isAddingCategory) { CategoryEditor(category: nil) }
+            .sheet(isPresented: $isAddingIncome) { IncomeEditor(income: nil) }
+            .sheet(isPresented: $isAddingPayment) { ExpectedPaymentEditor(payment: nil) }
         .sheet(item: $payingBill, onDismiss: openNextDueBill) { bill in
             let calendar = Calendar.current
-            let due = bill.dueDate(inMonthOf: .now) ?? .now
+            let due = bill.unpaidDueDate ?? .now
             let isOverdue = calendar.startOfDay(for: due) < calendar.startOfDay(for: .now)
             let moreCount = dueBills.filter { $0 != bill && !shownBills.contains($0.persistentModelID) }.count
             let more = moreCount > 0 ? " · \(moreCount) more due" : ""
@@ -56,10 +60,114 @@ private struct RootView: View {
         }
         .onAppear(perform: openTappedBill)
         .onChange(of: BillRouter.shared.openedCategoryID) { openTappedBill() }
+        // Links from the home-screen widget: moneytor://pay?id=… and moneytor://upcoming.
+        .onOpenURL { url in
+            guard url.scheme == "moneytor" else { return }
+            tab = .upcoming
+            if url.host() == "pay", let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "id" })?.value {
+                BillRouter.shared.openedCategoryID = BillReminders.decode(id)
+            }
+        }
         .task { refreshReminders() }
         .onChange(of: scenePhase) { refreshReminders() }
         .onChange(of: logs.count) { refreshReminders() }
-        .onChange(of: categories.map(\.dueDay)) { refreshReminders() }
+        .onChange(of: categories.map(\.dueDays)) { refreshReminders() }
+        .onChange(of: incomes.map(\.payDay)) { refreshReminders() }
+        .onChange(of: payments.count) { refreshReminders() }
+    }
+
+    @ViewBuilder private var tabs: some View {
+        // The receipt symbol only exists from iOS 18.2.
+        let expensesIcon = UIImage(systemName: "receipt") == nil ? "creditcard" : "receipt"
+        if #available(iOS 26, *) {
+            TabView(selection: $tab) {
+                Tab("Expenses", systemImage: expensesIcon, value: .expenses) { BudgetView() }
+                Tab("Income", systemImage: "banknote", value: .income) { IncomeView() }
+                Tab("Upcoming", systemImage: "calendar.badge.clock", value: .upcoming) { UpcomingView() }
+                    // Same bills the reminders are about; zero hides the badge.
+                    .badge(dueBills.count)
+                Tab("Settings", systemImage: "slider.horizontal.3", value: .settings) { SettingsView() }
+                // The search role is what places a tab in its own circle beside the tab bar.
+                Tab(tab == .income ? "Add Income" : "Add Category", systemImage: "plus", value: .add, role: .search) { Color.clear }
+                    .hidden(tab == .upcoming || tab == .settings)
+            }
+            // The system shrinks the bar to the current tab while scrolling down, but only brings it back
+            // near the top. Switching to .never on any scroll up makes it expand right away, with its own animation.
+            .tabBarMinimizeBehavior(tab == .settings || TabBarScroll.shared.isScrollingUp ? .never : .onScrollDown)
+            .overlay(alignment: .bottomTrailing) {
+                // A tab can't anchor a popover, so this stands where the add button sits on iPhone.
+                Color.clear
+                    .frame(width: 62, height: 62)
+                    .padding(.trailing, 21)
+                    .padding(.bottom, 21)
+                    .ignoresSafeArea()
+                    .popover(isPresented: $isChoosingIncome, arrowEdge: .bottom) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            let options: [(title: String, icon: String, detail: String, add: () -> Void)] = [
+                                ("Monthly Income", "banknote", "Keeps coming every month, like your salary.", { isAddingIncome = true }),
+                                ("Expected Payment", "calendar.badge.plus", "Comes a few times and then stops, like a loan being paid back or a bonus.", { isAddingPayment = true }),
+                            ]
+                            ForEach(options, id: \.title) { option in
+                                if option.title != options[0].title { Divider() }
+                                Button {
+                                    isChoosingIncome = false
+                                    option.add()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: option.icon)
+                                            .font(.title3)
+                                            .foregroundStyle(.tint)
+                                            .frame(width: 28)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(option.title)
+                                                .font(.body.weight(.semibold))
+                                            Text(option.detail)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .frame(width: 290)
+                        .presentationCompactAdaptation(.popover)
+                    }
+            }
+            .onChange(of: tab) { oldTab, newTab in
+                guard newTab == .add else { return }
+                if oldTab == .income {
+                    tab = .income
+                    isChoosingIncome = true
+                } else {
+                    tab = .expenses
+                    isAddingCategory = true
+                }
+            }
+        } else {
+            // Older systems can't set a tab apart, so Expenses shows a floating add button instead.
+            TabView(selection: $tab) {
+                BudgetView()
+                    .tabItem { Label("Expenses", systemImage: expensesIcon) }
+                    .tag(AppTab.expenses)
+                IncomeView()
+                    .tabItem { Label("Income", systemImage: "banknote") }
+                    .tag(AppTab.income)
+                UpcomingView()
+                    .tabItem { Label("Upcoming", systemImage: "calendar.badge.clock") }
+                    .badge(dueBills.count)
+                    .tag(AppTab.upcoming)
+                SettingsView()
+                    .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
+                    .tag(AppTab.settings)
+            }
+        }
     }
 
     /// Unpaid bills that are due today or overdue, oldest first.
@@ -73,9 +181,12 @@ private struct RootView: View {
     }
 
     private func refreshReminders() {
+        categories.forEach { $0.applyScheduledChange() }
+        incomes.forEach { $0.applyScheduledChange() }
         // Notification IDs come from each bill's saved ID, so save any new categories first.
         try? context.save()
         BillReminders.refresh(for: categories)
+        WidgetSync.refresh(categories: categories, incomes: incomes, payments: payments)
     }
 
     private func openTappedBill() {
@@ -138,7 +249,47 @@ private struct TapOutsideDismissesKeyboard: UIViewRepresentable {
     }
 }
 
+/// Which way the current page last scrolled, so the tab bar can expand as soon as it scrolls up.
+@Observable @MainActor
+final class TabBarScroll {
+    static let shared = TabBarScroll()
+    var isScrollingUp = false
+}
+
+@available(iOS 18, *)
+private struct CollapsesTabBarOnScroll: ViewModifier {
+    /// Only a finger moving the list counts. Rows being added or a sheet resizing the page also move the
+    /// offset, and changing the tab bar then throws the list out of step with the title and search bar.
+    @State private var isUserScrolling = false
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollPhaseChange { _, phase in
+                isUserScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                // Clamped so the bounce at either end doesn't count as a change of direction.
+                let offset = geometry.contentOffset.y + geometry.contentInsets.top
+                let maxOffset = geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom - geometry.containerSize.height
+                return min(max(offset, 0), max(maxOffset, 0))
+            } action: { old, new in
+                let isScrollingUp = new < old
+                guard isUserScrolling, new != old, TabBarScroll.shared.isScrollingUp != isScrollingUp else { return }
+                TabBarScroll.shared.isScrollingUp = isScrollingUp
+            }
+    }
+}
+
 extension View {
+    /// Lets the tab bar shrink while this list scrolls down and come back on any scroll up.
+    @ViewBuilder func collapsesTabBarOnScroll() -> some View {
+        if #available(iOS 18, *) {
+            modifier(CollapsesTabBarOnScroll())
+        } else {
+            self
+        }
+    }
+
     /// Closes a compact date picker's calendar as soon as a day is picked, rather than only on a tap
     /// outside it. Rebuilding the picker when its value changes is what closes the calendar.
     func closesWhenPicked(_ date: Date) -> some View {

@@ -18,6 +18,7 @@ struct LogSpendingSheet: View {
     @State private var fundingAmounts: [PersistentIdentifier: Decimal] = [:]
     /// Lets the user add more to a limit that's already fully used.
     @State private var logsAnyway = false
+    @State private var isTransferring = false
 
     var body: some View {
         let remaining = category.remainingThisPeriod
@@ -26,16 +27,19 @@ struct LogSpendingSheet: View {
         let showsPaid = category.limit > 0 && remaining <= 0 && !logsAnyway
 
         let spent = category.spentThisPeriod
+        let available = category.availableThisPeriod
+        let transferred = category.transferredThisPeriod
         let entered = max(amount ?? 0, 0)
         let isPreviewing = entered > 0 && !showsPaid
         let shownRemaining = isPreviewing ? remainingAfter : remaining
-        let usedRatio = category.limit > 0 ? NSDecimalNumber(decimal: (spent + entered) / category.limit).doubleValue : 1
+        let usedRatio = available > 0 ? NSDecimalNumber(decimal: (spent + entered) / available).doubleValue : 1
         let tint: Color = shownRemaining < 0 ? .red : usedRatio >= 0.8 && shownRemaining > 0 ? .orange : .green
         let period = category.currentPeriod
         let schedule = switch category.frequency {
         case .once: "Ends \(period.end.addingTimeInterval(-1).formatted(.dateTime.month(.abbreviated).day()))"
         case .daily: "Resets tomorrow"
         case .weekly: "Resets \(period.end.formatted(.dateTime.weekday(.wide)))"
+        case .biweekly: "Resets \(period.end.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))"
         case .monthly: "Resets \(period.end.formatted(.dateTime.month(.abbreviated).day()))"
         }
 
@@ -62,8 +66,8 @@ struct LogSpendingSheet: View {
             }
 
             GeometryReader { geometry in
-                let spentWidth = category.limit > 0
-                    ? min(NSDecimalNumber(decimal: spent / category.limit).doubleValue, 1) * geometry.size.width
+                let spentWidth = available > 0
+                    ? min(NSDecimalNumber(decimal: spent / available).doubleValue, 1) * geometry.size.width
                     : geometry.size.width
                 let previewWidth = min(usedRatio, 1) * geometry.size.width - spentWidth
                 ZStack(alignment: .leading) {
@@ -78,18 +82,26 @@ struct LogSpendingSheet: View {
             .frame(height: 10)
 
             HStack {
-                Text("\(spent.formatted(.currency(code: currencyCode))) of \(category.limit.formatted(.currency(code: currencyCode))) \(isBill ? "paid" : "used")")
+                Text("\(spent.formatted(.currency(code: currencyCode))) of \(category.periodLimit.formatted(.currency(code: currencyCode))) \(isBill ? "paid" : "used")")
                 Spacer()
                 Label(schedule, systemImage: "arrow.clockwise")
                     .labelStyle(.titleAndIcon)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            // Transfers change what's left, not the category's own limit.
+            if transferred != 0 {
+                Label("\(transferred.formatted(.currency(code: currencyCode).sign(strategy: .always()))) transferred \(transferred > 0 ? "in" : "out") \(category.periodName)",
+                      systemImage: transferred > 0 ? "arrow.down.left.circle.fill" : "arrow.up.right.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(transferred > 0 ? .green : .orange)
+            }
         }
         .padding(.vertical, 6)
         .animation(.snappy, value: amount)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(abs(shownRemaining).formatted(.currency(code: currencyCode))) \(shownRemaining < 0 ? "over" : "left")\(isPreviewing ? " after this" : ""). \(spent.formatted(.currency(code: currencyCode))) of \(category.limit.formatted(.currency(code: currencyCode))) \(isBill ? "paid" : "used"). \(schedule).")
+        .accessibilityLabel("\(abs(shownRemaining).formatted(.currency(code: currencyCode))) \(shownRemaining < 0 ? "over" : "left")\(isPreviewing ? " after this" : ""). \(spent.formatted(.currency(code: currencyCode))) of \(category.periodLimit.formatted(.currency(code: currencyCode))) \(isBill ? "paid" : "used")\(transferred == 0 ? "" : ", \(transferred.formatted(.currency(code: currencyCode).sign(strategy: .always()))) transferred"). \(schedule).")
 
         NavigationStack {
             Form {
@@ -120,6 +132,9 @@ struct LogSpendingSheet: View {
                         Button("Add Another Expense", systemImage: "plus.circle") {
                             logsAnyway = true
                         }
+                        Button("Transfer Funds", systemImage: "arrow.left.arrow.right") { isTransferring = true }
+                    } footer: {
+                        Text("Move unused money from another expense into \(category.name).")
                     }
 
                     ExpenseHistory(category: category)
@@ -166,6 +181,12 @@ struct LogSpendingSheet: View {
                         FundingPicker(total: amount ?? 0, amounts: $fundingAmounts)
                     }
 
+                    Section {
+                        Button("Transfer Funds", systemImage: "arrow.left.arrow.right") { isTransferring = true }
+                    } footer: {
+                        Text("Move money you won't use in \(category.name) to another expense, or bring some in.")
+                    }
+
                     ExpenseHistory(category: category)
                 }
             }
@@ -199,5 +220,6 @@ struct LogSpendingSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sheet(isPresented: $isTransferring) { TransferSheet(category: category) }
     }
 }
