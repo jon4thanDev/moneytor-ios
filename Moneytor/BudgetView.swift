@@ -49,7 +49,11 @@ struct BudgetView: View {
         let shownLogs = query.isEmpty ? logsThisMonth : logsThisMonth.filter {
             $0.note.localizedCaseInsensitiveContains(query) || ($0.category?.name.localizedCaseInsensitiveContains(query) ?? false)
         }
-        let sortedCategories = categories.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }.sorted { a, b in
+        // Finished ones (ended and paid off) only come back when searched for by name.
+        let finishedCount = query.isEmpty ? categories.filter(\.isFinished).count : 0
+        let sortedCategories = categories.filter {
+            query.isEmpty ? !$0.isFinished : $0.name.localizedCaseInsensitiveContains(query)
+        }.sorted { a, b in
             switch sort {
             case .name:
                 a.name.localizedStandardCompare(b.name) == .orderedAscending
@@ -165,6 +169,10 @@ struct BudgetView: View {
                             }
                             .textCase(nil)
                         }
+                    } footer: {
+                        if mode == .set && finishedCount > 0 {
+                            Text("\(finishedCount) finished categor\(finishedCount == 1 ? "y is" : "ies are") hidden. Search to find \(finishedCount == 1 ? "it" : "them").")
+                        }
                     }
 
                     if mode == .log && !completedCategories.isEmpty {
@@ -243,6 +251,7 @@ struct BudgetView: View {
                 } else {
                     ToolbarItem(placement: .topBarLeading) { logo }
                 }
+                ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 ToolbarItem(placement: .primaryAction) {
                     Button { AssistantRouter.shared.isShowing = true } label: { AIIcon() }
                         .accessibilityLabel("Assistant")

@@ -45,6 +45,10 @@ struct Interpretation: Decodable {
     var newName: String?
     /// How much to raise (positive) or lower (negative) an amount, from "increase rent by 500".
     var amountChange: Decimal?
+    /// Paying now for a later period, from "in advance", "advance payment", or "prepay".
+    var paysAhead: Bool?
+    /// How many months one advance payment covers, from "3 months in advance" or "for the next 5 months".
+    var monthsCovered: Int?
 }
 
 /// Rule-based understanding of short English budgeting messages, e.g. "spent 200 on lunch yesterday".
@@ -185,7 +189,7 @@ enum CommandParser {
         }
         // "from November", "starting jan 2027": only after a word like "from", since "may" is also an everyday word.
         if result.monthsAhead == nil,
-           let match = rest.firstMatch(of: #/\b(?:from|starting|start|beginning|effective|in|on|for|by)\s+(?:(?:in|on)\s+)?(?:the\s+month\s+of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b(?:\s+(\d{4}))?/#.ignoresCase()),
+           let match = rest.firstMatch(of: #/\b(?:(?:starting|beginning)\s+)?(?:from|starting|start|beginning|effective|in|on|for|by)\s+(?:(?:in|on)\s+)?(?:the\s+month\s+of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b(?:\s+(\d{4}))?/#.ignoresCase()),
            let index = monthNames.firstIndex(where: { $0.hasPrefix(match.output.1.lowercased().prefix(3)) }) {
             let thisMonth = calendar.component(.month, from: .now)
             if let year = match.output.2.flatMap({ Int($0) }) {
@@ -193,6 +197,23 @@ enum CommandParser {
             } else {
                 result.monthsAhead = (index + 1 - thisMonth + 12) % 12
             }
+            rest.replaceSubrange(match.range, with: " ")
+        }
+
+        // "pay loan in advance", "advance payment for rent", "prepay": taken out so it isn't part of the note.
+        // Not a bare "ahead", which is also in "go ahead".
+        if let range = rest.range(of: #"\b(?:in\s+advance|advanced?(?:\s+payment)?|pre-?pa(?:y|id|ying|yment)|(?:pay|paid|paying)\s+(?:it\s+)?(?:ahead|early))\b"#,
+                                  options: [.regularExpression, .caseInsensitive]) {
+            result.paysAhead = true
+            rest.replaceSubrange(range, with: " ")
+        }
+        // "3 months in advance", "for the next 5 months", "5 months ahead": taken out before amounts so the
+        // number isn't read as one. Without an advance word, only "next" or "ahead" makes it one.
+        if let match = rest.firstMatch(of: #/\b(?:for\s+)?(?:the\s+)?(next\s+)?(\d+)\s+months?(?:'s?\s+worth)?(\s+ahead)?(?:\s+of)?\b/#.ignoresCase()),
+           result.paysAhead == true || match.output.1 != nil || match.output.3 != nil,
+           let months = Int(match.output.2), months > 0 {
+            result.paysAhead = true
+            result.monthsCovered = months
             rest.replaceSubrange(match.range, with: " ")
         }
 
@@ -487,6 +508,12 @@ final class Assistant {
         var daysAgo = 0
         /// Categories the message only partly named, to ask which one it was.
         var categoryChoices: [String] = []
+        /// Paid now for later periods; see `aheadPeriods(for:in:)`.
+        var paysAhead = false
+        /// The month an advance payment starts from, from "next month" (1); nil means the next period.
+        var monthsAhead: Int?
+        /// How many months an advance payment covers.
+        var monthsCovered = 1
 
         var date: Date { Calendar.current.date(byAdding: .day, value: -max(daysAgo, 0), to: .now) ?? .now }
     }
@@ -601,7 +628,8 @@ final class Assistant {
         messages.append(Message(fromUser: true, text: text))
         let descriptor = FetchDescriptor<BudgetCategory>(predicate: #Predicate { !$0.isArchived }, sortBy: [SortDescriptor(\.createdAt)])
         allCategories = (try? context.fetch(descriptor)) ?? []
-        let categories = allCategories.filter { $0.status == .active }
+        // Ones that haven't started can still be paid early.
+        let categories = allCategories.filter { $0.status == .active || $0.earlyPaymentPeriod != nil }
         let names = categories.map(\.name)
         incomes = (try? context.fetch(FetchDescriptor<IncomeSource>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
 
@@ -640,7 +668,9 @@ final class Assistant {
                     excluded: rules.excluded,
                     monthsAhead: rules.monthsAhead,
                     newName: rules.newName,
-                    amountChange: rules.amountChange
+                    amountChange: rules.amountChange,
+                    paysAhead: rules.paysAhead,
+                    monthsCovered: rules.monthsCovered
                 )
             }
         } else {
@@ -855,6 +885,23 @@ final class Assistant {
 
         current.amount = interpretation.amount ?? current.amount
         current.daysAgo = interpretation.daysAgo ?? current.daysAgo
+        // "Loan 5000 next month" can only mean paying it now for next month; "this month" undoes that.
+        if current.kind != .income {
+            if let months = interpretation.monthsAhead, months > 0 {
+                current.paysAhead = true
+                current.monthsAhead = months
+            } else if interpretation.monthsAhead == 0 {
+                current.paysAhead = false
+                current.monthsAhead = nil
+                current.monthsCovered = 1
+            } else if interpretation.paysAhead == true {
+                current.paysAhead = true
+            }
+            if let months = interpretation.monthsCovered {
+                current.paysAhead = true
+                current.monthsCovered = months
+            }
+        }
         if let source {
             current.source = source.prefix(1).uppercased() + source.dropFirst()
         }
@@ -885,6 +932,15 @@ final class Assistant {
             reply("Was that an expense or income?", suggestions: ["Expense", "Income"])
         case .spend:
             guard let amount = current.amount else {
+                // "Pay next month's loan": offer what that bill still needs.
+                if let category = current.category {
+                    let ahead = aheadPeriods(for: current, in: category)
+                    let owed = ahead.reduce(Decimal(0)) { $0 + max(category.remaining(in: $1), 0) }
+                    if owed > 0 {
+                        return reply("How much are you paying ahead for \(category.title(of: ahead))? \(category.name) needs \(owed.formatted(.currency(code: currencyCode))) \(ahead.count == 1 ? "then" : "in total").",
+                                     suggestions: ["\(owed)"])
+                    }
+                }
                 return reply("How much was the expense?")
             }
             guard !categories.isEmpty else {
@@ -917,7 +973,16 @@ final class Assistant {
             }
             let paidWith = current.paidWith.map { " from \($0.name)" } ?? ""
             awaitingConfirmation = true
-            reply("Log \(amount.formatted(.currency(code: currencyCode))) to \(category.name)\(note) for \(day)\(paidWith)?", suggestions: ["Confirm", "Cancel"])
+            let ahead = aheadPeriods(for: current, in: category)
+            if !ahead.isEmpty {
+                let split = ahead.count > 1 ? " It's split in order, each \(category.frequency == .biweekly ? "period" : "month") getting what it needs." : ""
+                let instead = category.frequency == .once ? "" : ", not \(category.periodName)"
+                reply("Pay \(amount.formatted(.currency(code: currencyCode))) to \(category.name)\(note) in advance for \(category.title(of: ahead))\(paidWith)? It counts toward \(category.title(of: ahead))\(instead).\(split)",
+                      suggestions: ["Confirm", "Cancel"])
+            } else {
+                let cantPayAhead = current.paysAhead ? "\(category.name) resets \(category.frequency == .daily ? "daily" : category.frequency == .weekly ? "weekly" : "just once"), so it can't be paid in advance. " : ""
+                reply("\(cantPayAhead)Log \(amount.formatted(.currency(code: currencyCode))) to \(category.name)\(note) for \(day)\(paidWith)?", suggestions: ["Confirm", "Cancel"])
+            }
         case .income:
             guard let amount = current.amount else {
                 return reply("How much is it per month?")
@@ -937,22 +1002,57 @@ final class Assistant {
         let formattedAmount = amount.formatted(.currency(code: currencyCode))
 
         if current.kind == .spend, let category = current.category {
-            var remaining = category.remainingThisPeriod
-            if category.isInCurrentPeriod(current.date) { remaining -= amount }
+            let ahead = aheadPeriods(for: current, in: category)
             // Only a day the user mentioned, like "yesterday", counts as a set date.
-            let log = SpendLog(amount: amount, note: current.note ?? "", date: current.daysAgo > 0 ? current.date : nil, category: category)
-            context.insert(log)
-            if let income = current.paidWith {
-                log.setFundings([income.persistentModelID: amount], from: [income], in: context)
+            let date = current.daysAgo > 0 ? current.date : nil
+            let logs: [SpendLog]
+            let remaining: Decimal
+            if ahead.isEmpty {
+                remaining = category.remaining(in: category.currentPeriod) - (category.isInCurrentPeriod(current.date) ? amount : 0)
+                let log = SpendLog(amount: amount, note: current.note ?? "", date: date, category: category)
+                context.insert(log)
+                logs = [log]
+            } else {
+                logs = category.payAhead(amount, for: ahead, note: current.note ?? "", date: date, in: context)
+                remaining = ahead.reduce(Decimal(0)) { $0 + category.remaining(in: $1) }
             }
+            if let income = current.paidWith {
+                for log in logs { log.setFundings([income.persistentModelID: log.amount], from: [income], in: context) }
+            }
+            let periodName = ahead.isEmpty ? category.periodName : "for \(category.title(of: ahead))"
             let status = remaining < 0
-                ? "You're \((-remaining).formatted(.currency(code: currencyCode))) over your \(category.name) limit \(category.periodName)."
-                : "You have \(remaining.formatted(.currency(code: currencyCode))) left in \(category.name) \(category.periodName)."
-            reply("Done! Logged \(formattedAmount) to \(category.name). \(status)")
+                ? "You're \((-remaining).formatted(.currency(code: currencyCode))) over your \(category.name) limit \(periodName)."
+                : remaining == 0 && category.dueDay != nil ? "\(category.name) is fully paid \(periodName)."
+                : "You have \(remaining.formatted(.currency(code: currencyCode))) left in \(category.name) \(periodName)."
+            reply("Done! \(ahead.isEmpty ? "Logged" : "Paid") \(formattedAmount) to \(category.name)\(ahead.isEmpty ? "" : " in advance"). \(status)")
         } else if current.kind == .income, let source = current.source {
             context.insert(IncomeSource(name: source, amount: amount))
             reply("Done! Added \(source) at \(formattedAmount) per month.")
         }
+    }
+
+    /// The later periods an advance payment covers, starting from the month named or else the first later
+    /// period that still needs paying, and stopping at the end date. A one-time payment that isn't due yet is
+    /// always paid early. Empty when it isn't paid ahead, or the category resets too often to pay ahead.
+    private func aheadPeriods(for draft: Draft, in category: BudgetCategory) -> [DateInterval] {
+        if category.frequency == .once {
+            return category.currentPeriod.start > .now ? [category.currentPeriod] : []
+        }
+        guard draft.paysAhead || category.status == .upcoming, category.canPayAhead else { return [] }
+        var first = category.period(after: draft.monthsAhead == nil ? category.nextUnpaidPeriodsAhead ?? 1 : 1)
+        if let months = draft.monthsAhead, let date = Calendar.current.date(byAdding: .month, value: months, to: .now),
+           category.period(containing: date).start > category.currentPeriod.start {
+            first = category.period(containing: date)
+        }
+        // Every-2-weeks limits have about two periods a month.
+        let count = category.frequency == .biweekly ? draft.monthsCovered * 2 : draft.monthsCovered
+        var periods = [first]
+        while periods.count < count, let last = periods.last {
+            let next = category.period(containing: last.end)
+            guard category.limit(for: next) > 0 else { break }
+            periods.append(next)
+        }
+        return periods
     }
 
     /// Folds a message into the change being set up: a fresh request, or an answer to the last question.
@@ -1174,7 +1274,7 @@ final class Assistant {
         let money = { (value: Decimal) in value.formatted(.currency(code: currencyCode)) }
         let spentThisMonth = { (category: BudgetCategory) in
             category.logs
-                .filter { Calendar.current.isDate($0.effectiveDate, equalTo: .now, toGranularity: .month) }
+                .filter { Calendar.current.isDate($0.countedDate, equalTo: .now, toGranularity: .month) }
                 .reduce(0) { $0 + $1.amount }
         }
         let included = allCategories.filter { !excluded.contains($0.name) }

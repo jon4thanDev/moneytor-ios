@@ -63,7 +63,7 @@ struct ExpenseHistory: View {
                         Spacer()
                         Text(log.amount, format: .currency(code: currencyCode))
                             .monospacedDigit()
-                            .foregroundStyle(category.isInCurrentPeriod(log.effectiveDate) ? .primary : .secondary)
+                            .foregroundStyle(category.isInCurrentPeriod(log.countedDate) ? .primary : .secondary)
                     }
                 case .transfer(let transfer):
                     let isIncoming = transfer.to == category
@@ -153,7 +153,8 @@ struct LoadMoreButton: View {
     }
 }
 
-/// The date the user set for an expense, or when it was logged if they didn't set one.
+/// The date the user set for an expense, or when it was logged if they didn't set one, plus the
+/// period it was paid ahead for.
 struct LogDateLabel: View {
     let log: SpendLog
 
@@ -162,12 +163,19 @@ struct LogDateLabel: View {
         let isThisYear = Calendar.current.isDate(date, equalTo: .now, toGranularity: .year)
         let day = isThisYear ? date.formatted(.dateTime.month(.abbreviated).day()) : date.formatted(.dateTime.month(.abbreviated).day().year())
 
-        if log.date != nil {
-            Label(day, systemImage: "calendar")
-                .labelStyle(CompactLabelStyle())
-        } else {
-            Label("\(day), \(date.formatted(date: .omitted, time: .shortened))", systemImage: "clock")
-                .labelStyle(CompactLabelStyle())
+        HStack(spacing: 4) {
+            if log.date != nil {
+                Label(day, systemImage: "calendar")
+                    .labelStyle(CompactLabelStyle())
+            } else {
+                Label("\(day), \(date.formatted(date: .omitted, time: .shortened))", systemImage: "clock")
+                    .labelStyle(CompactLabelStyle())
+            }
+            if let ahead = log.paidAheadFor, let category = log.category {
+                Label("paid ahead for \(category.title(of: category.period(containing: ahead)))", systemImage: "forward.fill")
+                    .labelStyle(CompactLabelStyle())
+                    .foregroundStyle(Color.accentColor)
+            }
         }
     }
 }

@@ -24,7 +24,11 @@ struct IncomeView: View {
         let sortedIncomes = incomes.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }.sorted {
             sort == .name ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.amount > $1.amount
         }
-        let sortedPayments = payments.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }.sorted {
+        // Finished ones (every payment has come in) only come back when searched for by name.
+        let finishedCount = query.isEmpty ? payments.filter(\.isFinished).count : 0
+        let sortedPayments = payments.filter {
+            query.isEmpty ? !$0.isFinished : $0.name.localizedCaseInsensitiveContains(query)
+        }.sorted {
             sort == .name ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.amount > $1.amount
         }
         let today = Calendar.current.startOfDay(for: .now)
@@ -169,7 +173,7 @@ struct IncomeView: View {
                 }
 
                 Section {
-                    if payments.isEmpty {
+                    if sortedPayments.isEmpty && query.isEmpty {
                         Button("Add Expected Payment", systemImage: "plus.circle") { isAddingPayment = true }
                     }
                     ForEach(sortedPayments) { payment in
@@ -187,10 +191,12 @@ struct IncomeView: View {
                     HStack {
                         Text("Expected Payments")
                         Spacer()
-                        if !payments.isEmpty { sortMenu }
+                        if !sortedPayments.isEmpty { sortMenu }
                     }
                 } footer: {
-                    Text("For money that comes in only a few times and then stops, like a friend paying back a loan in 3 installments, a one-time bonus, or a refund. Unlike your salary, it isn't counted in your monthly income.")
+                    let hidden = finishedCount == 0 ? ""
+                        : "\(finishedCount) finished payment\(finishedCount == 1 ? " is" : "s are") hidden. Search to find \(finishedCount == 1 ? "it" : "them").\n\n"
+                    Text(hidden + "For money that comes in only a few times and then stops, like a friend paying back a loan in 3 installments, a one-time bonus, or a refund. Unlike your salary, it isn't counted in your monthly income.")
                 }
             }
             .navigationTitle("Income")
@@ -217,6 +223,7 @@ struct IncomeView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
                 ToolbarItem(placement: .primaryAction) {
                     Button { AssistantRouter.shared.isShowing = true } label: { AIIcon() }
                         .accessibilityLabel("Assistant")
@@ -357,7 +364,6 @@ private struct ExpectedPaymentRow: View {
 
     var body: some View {
         let dates = payment.paymentDates
-        let isFinished = (dates.last ?? payment.startDate) < Calendar.current.startOfDay(for: .now)
         let schedule = payment.frequency == .once
             ? "Once · \(payment.startDate.formatted(.dateTime.month(.abbreviated).day().year()))"
             : "\(payment.frequency.rawValue) · \(payment.startDate.formatted(.dateTime.month(.abbreviated).day())) – \(payment.endDate.formatted(.dateTime.month(.abbreviated).day().year()))"
@@ -365,7 +371,7 @@ private struct ExpectedPaymentRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(payment.name)
-                Text(isFinished ? "\(schedule) · Finished" : schedule)
+                Text(payment.isFinished ? "\(schedule) · Finished" : schedule)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -373,7 +379,7 @@ private struct ExpectedPaymentRow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(payment.amount, format: .currency(code: currencyCode))
                     .monospacedDigit()
-                    .foregroundStyle(isFinished ? Color.secondary : Color.green)
+                    .foregroundStyle(payment.isFinished ? Color.secondary : Color.green)
                 if dates.count > 1 {
                     Text("\(dates.count)× · \((payment.amount * Decimal(dates.count)).formatted(.currency(code: currencyCode))) total")
                         .font(.caption)

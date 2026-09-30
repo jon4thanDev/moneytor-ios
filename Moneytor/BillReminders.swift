@@ -65,11 +65,12 @@ enum BillReminders {
     }
 }
 
-/// Hands the bill from a tapped notification to the UI.
+/// Hands the bill, or the Reminders tab, from a tapped notification to the UI.
 @Observable @MainActor
 final class BillRouter {
     static let shared = BillRouter()
     var openedCategoryID: PersistentIdentifier?
+    var opensReminders = false
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -87,9 +88,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        let id = BillReminders.categoryID(fromNotification: response.notification.request.identifier)
+        let identifier = response.notification.request.identifier
+        let id = BillReminders.categoryID(fromNotification: identifier)
         Task { @MainActor in
-            BillRouter.shared.openedCategoryID = id
+            if identifier.hasPrefix(ReminderNotifications.prefix) {
+                BillRouter.shared.opensReminders = true
+            } else {
+                BillRouter.shared.openedCategoryID = id
+            }
             completionHandler()
         }
     }

@@ -11,7 +11,7 @@ struct MoneytorApp: App {
             RootView()
                 .preferredColorScheme(appearance.colorScheme)
         }
-        .modelContainer(for: [BudgetCategory.self, SpendLog.self, IncomeSource.self, ExpectedPayment.self, Funding.self, Transfer.self])
+        .modelContainer(for: [BudgetCategory.self, SpendLog.self, IncomeSource.self, ExpectedPayment.self, Funding.self, Transfer.self, Reminder.self])
     }
 }
 
@@ -23,19 +23,24 @@ private struct RootView: View {
     @Query private var logs: [SpendLog]
     @Query private var incomes: [IncomeSource]
     @Query private var payments: [ExpectedPayment]
+    @Query private var reminders: [Reminder]
     @State private var payingBill: BudgetCategory?
     /// Bills already opened in this run of reminders, so a partly paid one doesn't come back right away.
     @State private var shownBills: Set<PersistentIdentifier> = []
     @State private var didPay = false
     @State private var tab: AppTab = .expenses
     @State private var isAddingCategory = false
-    @State private var isChoosingIncome = false
+    /// The add button's menu on Expenses and Income.
+    @State private var isChoosingAdd = false
     @State private var isAddingIncome = false
     @State private var isAddingPayment = false
+    @State private var isAddingReminder = false
+    @State private var payingAhead: BudgetCategory?
 
     private enum AppTab: Hashable {
-        case expenses, income, upcoming, settings
-        /// Not a page: selecting it adds income on the Income tab and a category anywhere else.
+        case expenses, income, upcoming, reminders
+        /// Not a page: selecting it adds a reminder on the Reminders tab, and opens a menu of what to
+        /// add on Expenses and Income.
         case add
     }
 
@@ -43,9 +48,12 @@ private struct RootView: View {
         tabs
             .background(TapOutsideDismissesKeyboard())
             .sheet(isPresented: Bindable(AssistantRouter.shared).isShowing) { AssistantView() }
+            .sheet(isPresented: Bindable(SettingsRouter.shared).isShowing) { SettingsView() }
             .sheet(isPresented: $isAddingCategory) { CategoryEditor(category: nil) }
+            .sheet(item: $payingAhead) { LogSpendingSheet(category: $0, periodsAhead: $0.nextUnpaidPeriodsAhead ?? 0) }
             .sheet(isPresented: $isAddingIncome) { IncomeEditor(income: nil) }
             .sheet(isPresented: $isAddingPayment) { ExpectedPaymentEditor(payment: nil) }
+            .sheet(isPresented: $isAddingReminder) { ReminderEditor(reminder: nil) }
         .sheet(item: $payingBill, onDismiss: openNextDueBill) { bill in
             let calendar = Calendar.current
             let due = bill.unpaidDueDate ?? .now
@@ -60,6 +68,11 @@ private struct RootView: View {
         }
         .onAppear(perform: openTappedBill)
         .onChange(of: BillRouter.shared.openedCategoryID) { openTappedBill() }
+        .onChange(of: BillRouter.shared.opensReminders, initial: true) { _, opens in
+            guard opens else { return }
+            BillRouter.shared.opensReminders = false
+            tab = .reminders
+        }
         // Links from the home-screen widget: moneytor://pay?id=… and moneytor://upcoming.
         .onOpenURL { url in
             guard url.scheme == "moneytor" else { return }
@@ -75,6 +88,7 @@ private struct RootView: View {
         .onChange(of: categories.map(\.dueDays)) { refreshReminders() }
         .onChange(of: incomes.map(\.payDay)) { refreshReminders() }
         .onChange(of: payments.count) { refreshReminders() }
+        .onChange(of: reminders.map { [$0.title, $0.notes, $0.alertDate?.description ?? "", "\($0.isDone)"] }) { refreshReminders() }
     }
 
     @ViewBuilder private var tabs: some View {
@@ -87,14 +101,17 @@ private struct RootView: View {
                 Tab("Upcoming", systemImage: "calendar.badge.clock", value: .upcoming) { UpcomingView() }
                     // Same bills the reminders are about; zero hides the badge.
                     .badge(dueBills.count)
-                Tab("Settings", systemImage: "slider.horizontal.3", value: .settings) { SettingsView() }
-                // The search role is what places a tab in its own circle beside the tab bar.
-                Tab(tab == .income ? "Add Income" : "Add Category", systemImage: "plus", value: .add, role: .search) { Color.clear }
-                    .hidden(tab == .upcoming || tab == .settings)
+                Tab("Reminders", systemImage: "checklist", value: .reminders) { RemindersView() }
+                    .badge(dueReminderCount)
+                // The search role is what places a tab in its own circle beside the tab bar. Four pages plus
+                // this is as many as fit before iOS adds a More tab, which is why Settings opens from a gear.
+                Tab(tab == .income ? "Add Income" : tab == .reminders ? "Add Reminder" : "Add",
+                    systemImage: "plus", value: .add, role: .search) { Color.clear }
+                    .hidden(tab == .upcoming)
             }
             // The system shrinks the bar to the current tab while scrolling down, but only brings it back
             // near the top. Switching to .never on any scroll up makes it expand right away, with its own animation.
-            .tabBarMinimizeBehavior(tab == .settings || TabBarScroll.shared.isScrollingUp ? .never : .onScrollDown)
+            .tabBarMinimizeBehavior(TabBarScroll.shared.isScrollingUp ? .never : .onScrollDown)
             .overlay(alignment: .bottomTrailing) {
                 // A tab can't anchor a popover, so this stands where the add button sits on iPhone.
                 Color.clear
@@ -102,52 +119,64 @@ private struct RootView: View {
                     .padding(.trailing, 21)
                     .padding(.bottom, 21)
                     .ignoresSafeArea()
-                    .popover(isPresented: $isChoosingIncome, arrowEdge: .bottom) {
+                    .popover(isPresented: $isChoosingAdd, arrowEdge: .bottom) {
                         VStack(alignment: .leading, spacing: 0) {
-                            let options: [(title: String, icon: String, detail: String, add: () -> Void)] = [
-                                ("Monthly Income", "banknote", "Keeps coming every month, like your salary.", { isAddingIncome = true }),
-                                ("Expected Payment", "calendar.badge.plus", "Comes a few times and then stops, like a loan being paid back or a bonus.", { isAddingPayment = true }),
-                            ]
-                            ForEach(options, id: \.title) { option in
-                                if option.title != options[0].title { Divider() }
+                            if tab == .income {
                                 Button {
-                                    isChoosingIncome = false
-                                    option.add()
+                                    isChoosingAdd = false
+                                    isAddingIncome = true
                                 } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: option.icon)
-                                            .font(.title3)
-                                            .foregroundStyle(.tint)
-                                            .frame(width: 28)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(option.title)
-                                                .font(.body.weight(.semibold))
-                                            Text(option.detail)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                                .fixedSize(horizontal: false, vertical: true)
+                                    AddOption(title: "Monthly Income", icon: "banknote", detail: "Keeps coming every month, like your salary.")
+                                }
+                                Divider()
+                                Button {
+                                    isChoosingAdd = false
+                                    isAddingPayment = true
+                                } label: {
+                                    AddOption(title: "Expected Payment", icon: "calendar.badge.plus",
+                                              detail: "Comes a few times and then stops, like a loan being paid back or a bonus.")
+                                }
+                            } else {
+                                // Bills first, soonest due day first.
+                                let payable = categories.filter { $0.earlyPaymentPeriod != nil }
+                                    .sorted { ($0.dueDay ?? .max, $0.name.lowercased()) < ($1.dueDay ?? .max, $1.name.lowercased()) }
+                                Button {
+                                    isChoosingAdd = false
+                                    isAddingCategory = true
+                                } label: {
+                                    AddOption(title: "New Category", icon: "square.grid.2x2", detail: "A spending limit or a bill, like Food or Rent.")
+                                }
+                                Divider()
+                                Menu {
+                                    ForEach(payable) { category in
+                                        let next = category.earlyPaymentPeriod ?? category.currentPeriod
+                                        Button {
+                                            isChoosingAdd = false
+                                            payingAhead = category
+                                        } label: {
+                                            Text(category.name)
+                                            Text("\(category.title(of: next)) · \(category.remaining(in: next).formatted(.currency(code: currencyCode))) \(category.dueDay != nil ? "to pay" : "left")")
                                         }
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
+                                } label: {
+                                    AddOption(title: "Advance Payment", icon: "forward.circle",
+                                              detail: payable.isEmpty ? "Nothing to pay early right now." : "Pay now for later months or a payment that isn't due yet.")
                                 }
-                                .buttonStyle(.plain)
+                                .disabled(payable.isEmpty)
                             }
                         }
+                        .buttonStyle(.plain)
                         .frame(width: 290)
                         .presentationCompactAdaptation(.popover)
                     }
             }
             .onChange(of: tab) { oldTab, newTab in
                 guard newTab == .add else { return }
-                if oldTab == .income {
-                    tab = .income
-                    isChoosingIncome = true
+                tab = oldTab
+                if oldTab == .reminders {
+                    isAddingReminder = true
                 } else {
-                    tab = .expenses
-                    isAddingCategory = true
+                    isChoosingAdd = true
                 }
             }
         } else {
@@ -163,9 +192,10 @@ private struct RootView: View {
                     .tabItem { Label("Upcoming", systemImage: "calendar.badge.clock") }
                     .badge(dueBills.count)
                     .tag(AppTab.upcoming)
-                SettingsView()
-                    .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
-                    .tag(AppTab.settings)
+                RemindersView()
+                    .tabItem { Label("Reminders", systemImage: "checklist") }
+                    .badge(dueReminderCount)
+                    .tag(AppTab.reminders)
             }
         }
     }
@@ -180,12 +210,19 @@ private struct RootView: View {
             .map(\.0)
     }
 
+    /// Reminders not done yet that are due today or overdue.
+    private var dueReminderCount: Int {
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now)) ?? .now
+        return reminders.filter { !$0.isDone && $0.dueDate.map { $0 < tomorrow } == true }.count
+    }
+
     private func refreshReminders() {
         categories.forEach { $0.applyScheduledChange() }
         incomes.forEach { $0.applyScheduledChange() }
-        // Notification IDs come from each bill's saved ID, so save any new categories first.
+        // Notification IDs come from each bill's and reminder's saved ID, so save any new ones first.
         try? context.save()
         BillReminders.refresh(for: categories)
+        ReminderNotifications.refresh(for: reminders)
         WidgetSync.refresh(categories: categories, incomes: incomes, payments: payments)
     }
 
@@ -210,6 +247,35 @@ private struct RootView: View {
         }
         shownBills.insert(next.persistentModelID)
         payingBill = next
+    }
+}
+
+/// One choice in the add button's popover: an icon, a name, and a line on what it's for.
+private struct AddOption: View {
+    let title: String
+    let icon: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

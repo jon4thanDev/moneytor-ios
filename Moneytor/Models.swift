@@ -77,8 +77,20 @@ final class BudgetCategory {
         return .active
     }
 
+    /// Ended with nothing left to pay: a bill whose last due date is paid, or a limit that just ran its course.
+    var isFinished: Bool {
+        guard status == .ended, let endDate else { return false }
+        let calendar = Calendar.current
+        let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate)) ?? endDate
+        guard let lastDue = dueDates(in: DateInterval(start: starts, end: max(starts, end))).last else { return true }
+        return remaining(in: period(containing: lastDue)) <= 0
+    }
+
     /// The stretch of time whose spending counts against the limit right now.
-    var currentPeriod: DateInterval {
+    var currentPeriod: DateInterval { period(containing: .now) }
+
+    /// The stretch of time whose spending counts against the limit on `date`. One-time limits have just the one.
+    func period(containing date: Date) -> DateInterval {
         let calendar = Calendar.current
         let component: Calendar.Component
         switch frequency {
@@ -89,7 +101,7 @@ final class BudgetCategory {
         case .biweekly:
             // Two-week cycles counted from the start date.
             let anchor = calendar.startOfDay(for: starts)
-            let days = calendar.dateComponents([.day], from: anchor, to: calendar.startOfDay(for: .now)).day ?? 0
+            let days = calendar.dateComponents([.day], from: anchor, to: calendar.startOfDay(for: date)).day ?? 0
             let cycle = Int((Double(days) / 14).rounded(.down))
             let start = calendar.date(byAdding: .day, value: cycle * 14, to: anchor) ?? anchor
             return DateInterval(start: start, end: calendar.date(byAdding: .day, value: 14, to: start) ?? start)
@@ -97,7 +109,70 @@ final class BudgetCategory {
         case .weekly: component = .weekOfYear
         case .monthly: component = .month
         }
-        return calendar.dateInterval(of: component, for: .now) ?? DateInterval(start: .now, duration: 0)
+        return calendar.dateInterval(of: component, for: date) ?? DateInterval(start: date, duration: 0)
+    }
+
+    /// The period `count` periods after the current one, like next month's for 1.
+    func period(after count: Int) -> DateInterval {
+        (0..<max(count, 0)).reduce(currentPeriod) { period, _ in self.period(containing: period.end) }
+    }
+
+    /// Monthly and every-2-weeks limits can be paid in advance for a later period, like next month's loan.
+    var canPayAhead: Bool { frequency == .monthly || frequency == .biweekly }
+
+    /// A period in words: "November" (with the year when it isn't this year), "Nov 14 – Nov 27" for
+    /// every-2-weeks limits, or the day of a one-time one.
+    func title(of period: DateInterval) -> String {
+        let isThisYear = Calendar.current.isDate(period.start, equalTo: .now, toGranularity: .year)
+        switch frequency {
+        case .biweekly:
+            let day = Date.FormatStyle.dateTime.month(.abbreviated).day()
+            return "\(period.start.formatted(day)) – \(period.end.addingTimeInterval(-1).formatted(day))"
+        case .once:
+            return period.start.formatted(isThisYear ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year())
+        default:
+            return period.start.formatted(isThisYear ? .dateTime.month(.wide) : .dateTime.month(.wide).year())
+        }
+    }
+
+    /// How many periods from now the first later one that still needs paying is, like 2 when next month
+    /// was already paid in advance; nil when none does before the end date.
+    var nextUnpaidPeriodsAhead: Int? { (1...24).first { remaining(in: period(after: $0)) > 0 } }
+
+    /// What can be paid early: the next unpaid period of a monthly or every-2-weeks limit, or a one-time
+    /// one that hasn't come yet. Nil for anything ended, fully paid, or that resets too often.
+    var earlyPaymentPeriod: DateInterval? {
+        guard status != .ended, limit > 0 else { return nil }
+        if frequency == .once {
+            return status == .upcoming && remaining(in: currentPeriod) > 0 ? currentPeriod : nil
+        }
+        return canPayAhead ? nextUnpaidPeriodsAhead.map { period(after: $0) } : nil
+    }
+
+    /// Several periods in a row in words: "October – December", or "3 periods from Oct 1" for every-2-weeks limits.
+    func title(of periods: [DateInterval]) -> String {
+        guard let first = periods.first, let last = periods.last, periods.count > 1 else { return periods.first.map { title(of: $0) } ?? "" }
+        if frequency == .biweekly {
+            return "\(periods.count) periods from \(first.start.formatted(.dateTime.month(.abbreviated).day()))"
+        }
+        let sameYear = Calendar.current.isDate(first.start, equalTo: last.start, toGranularity: .year)
+        return "\(sameYear ? first.start.formatted(.dateTime.month(.wide)) : title(of: first)) – \(title(of: last))"
+    }
+
+    /// Logs `amount` paid in advance for `periods`, one expense per period so each counts where it belongs.
+    /// Each period gets what it still needs, in order, and the last one gets whatever is left.
+    @discardableResult
+    func payAhead(_ amount: Decimal, for periods: [DateInterval], note: String, date: Date?, in context: ModelContext) -> [SpendLog] {
+        var left = amount
+        return periods.enumerated().compactMap { index, period in
+            let portion = index == periods.count - 1 ? left : min(left, max(remaining(in: period), 0))
+            left -= portion
+            guard portion > 0 else { return nil }
+            let log = SpendLog(amount: portion, note: note, date: date, category: self)
+            log.paidAheadFor = period.start
+            context.insert(log)
+            return log
+        }
     }
 
     /// Finishes phrases like "₱200 left in Food ___".
@@ -116,26 +191,41 @@ final class BudgetCategory {
         return date >= period.start && date < period.end
     }
 
-    var spentThisPeriod: Decimal {
-        logs.filter { isInCurrentPeriod($0.effectiveDate) }.reduce(0) { $0 + $1.amount }
+    /// Expenses counted in `period`, including ones paid ahead for it.
+    func spent(in period: DateInterval) -> Decimal {
+        logs.filter { $0.countedDate >= period.start && $0.countedDate < period.end }.reduce(0) { $0 + $1.amount }
     }
 
-    /// Money moved in minus money moved out, counting transfers made in the current period.
-    var transferredThisPeriod: Decimal {
-        transfersIn.filter { isInCurrentPeriod($0.createdAt) }.reduce(0) { $0 + $1.amount }
-            - transfersOut.filter { isInCurrentPeriod($0.createdAt) }.reduce(0) { $0 + $1.amount }
+    var spentThisPeriod: Decimal { spent(in: currentPeriod) }
+
+    /// Money moved in minus money moved out, counting transfers made in `period`.
+    func transferred(in period: DateInterval) -> Decimal {
+        let isIn = { (transfer: Transfer) in transfer.createdAt >= period.start && transfer.createdAt < period.end }
+        return transfersIn.filter(isIn).reduce(0) { $0 + $1.amount } - transfersOut.filter(isIn).reduce(0) { $0 + $1.amount }
     }
 
-    /// What the current period allows before transfers. A monthly bill due on several days needs
-    /// `limit` for each of this month's due dates.
-    var periodLimit: Decimal {
-        frequency == .monthly && dueDays.count > 1 ? limit * Decimal(max(dueDates(in: currentPeriod).count, 1)) : limit
+    var transferredThisPeriod: Decimal { transferred(in: currentPeriod) }
+
+    /// What `period` allows before transfers; nothing before the start date or after the end date. A
+    /// monthly bill due on several days needs its amount for each of that month's due dates.
+    func limit(for period: DateInterval) -> Decimal {
+        let calendar = Calendar.current
+        let lastDay = endDate.flatMap { calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: $0)) }
+        guard period.end > calendar.startOfDay(for: starts), period.start < lastDay ?? .distantFuture else { return 0 }
+        let amount = limitAmount(inMonthOf: period.start)
+        return frequency == .monthly && dueDays.count > 1 ? amount * Decimal(max(dueDates(in: period).count, 1)) : amount
     }
+
+    var periodLimit: Decimal { limit(for: currentPeriod) }
 
     /// The period's limit plus whatever was moved in (or minus what was moved out) this period.
     var availableThisPeriod: Decimal { periodLimit + transferredThisPeriod }
 
-    var remainingThisPeriod: Decimal { availableThisPeriod - spentThisPeriod }
+    func remaining(in period: DateInterval) -> Decimal {
+        limit(for: period) + transferred(in: period) - spent(in: period)
+    }
+
+    var remainingThisPeriod: Decimal { remaining(in: currentPeriod) }
 
     /// How much this limit adds up to within the current month, so daily and weekly limits
     /// can be compared with monthly income.
@@ -166,7 +256,7 @@ final class BudgetCategory {
         guard status != .ended, limitThisMonth > 0 else { return 0 }
         if frequency == .once { return remainingThisPeriod }
         let isThisMonth = { (date: Date) in Calendar.current.isDate(date, equalTo: .now, toGranularity: .month) }
-        let spent = logs.filter { isThisMonth($0.effectiveDate) }.reduce(0) { $0 + $1.amount }
+        let spent = logs.filter { isThisMonth($0.countedDate) }.reduce(0) { $0 + $1.amount }
         let transferred = transfersIn.filter { isThisMonth($0.createdAt) }.reduce(0) { $0 + $1.amount }
             - transfersOut.filter { isThisMonth($0.createdAt) }.reduce(0) { $0 + $1.amount }
         return limitThisMonth + transferred - spent
@@ -239,17 +329,25 @@ final class BudgetCategory {
     var unpaidDueDate: Date? { unpaidDue?.date }
 
     /// Due dates from the start of this period until `end` that still need paying, with what each needs.
+    /// Each period's payments, including any made ahead of time, cover its due dates in order.
     func unpaidDues(until end: Date) -> [(date: Date, amount: Decimal)] {
-        guard status != .ended, limit > 0 else { return [] }
-        let period = currentPeriod
-        guard end > period.start else { return [] }
-        let unpaid = unpaidDue
-        return dueDates(in: DateInterval(start: period.start, end: end)).compactMap { due in
-            // Later periods have nothing paid yet; this one is paid off in date order.
-            guard due < period.end else { return (due, limitAmount(inMonthOf: due)) }
-            guard let unpaid, due >= unpaid.date else { return nil }
-            return (due, due == unpaid.date ? unpaid.amount : limit)
+        guard status != .ended, limit > 0, dueDay != nil, canPayAhead else { return [] }
+        var period = currentPeriod
+        var unpaid: [(date: Date, amount: Decimal)] = []
+        while period.start < end, unpaid.count < 1000 {
+            let dues = dueDates(in: period)
+            let each = limitAmount(inMonthOf: period.start)
+            let owed = remaining(in: period)
+            var isFirstUnpaid = true
+            for (index, due) in dues.enumerated() {
+                let owedForLater = each * Decimal(dues.count - 1 - index)
+                guard owed > owedForLater else { continue }
+                if due < end { unpaid.append((due, isFirstUnpaid ? owed - owedForLater : each)) }
+                isFirstUnpaid = false
+            }
+            period = self.period(containing: period.end)
         }
+        return unpaid
     }
 }
 
@@ -278,6 +376,9 @@ final class SpendLog {
     /// Which incomes paid for this expense. One expense can be split across several incomes.
     @Relationship(deleteRule: .cascade, inverse: \Funding.log)
     var fundings: [Funding] = []
+    /// The start of the later period this was paid in advance for, like next month's loan paid today.
+    /// Nil for everyday expenses, which count in the period of `effectiveDate`.
+    var paidAheadFor: Date?
 
     init(amount: Decimal, note: String, date: Date?, category: BudgetCategory) {
         self.amount = amount
@@ -289,6 +390,10 @@ final class SpendLog {
 
     /// The day the expense counts on: the date the user set, otherwise when it was logged.
     var effectiveDate: Date { date ?? createdAt ?? .distantPast }
+
+    /// The day the expense counts on against its limit: the period it was paid ahead for, otherwise
+    /// `effectiveDate`. Income still pays for it on `effectiveDate`, when the money actually left.
+    var countedDate: Date { paidAheadFor ?? effectiveDate }
 
     /// True when linked incomes cover the full amount. Links to a deleted income don't count.
     var isLinked: Bool {
@@ -388,6 +493,40 @@ final class Transfer {
     }
 }
 
+/// Something to remember, like "Renew car registration", so it doesn't need the Reminders app.
+@Model
+final class Reminder {
+    var title: String
+    var notes = ""
+    /// When it's due; nil for reminders without a date. Only the day counts unless `hasTime` is on.
+    var dueDate: Date?
+    var hasTime = false
+    var isDone = false
+    var completedAt: Date?
+    var createdAt: Date
+
+    init(title: String, dueDate: Date? = nil, hasTime: Bool = false) {
+        self.title = title
+        self.dueDate = dueDate
+        self.hasTime = hasTime
+        self.createdAt = .now
+    }
+
+    /// When its notification goes off: the time set, otherwise 9 AM on the day.
+    var alertDate: Date? {
+        guard let dueDate else { return nil }
+        return hasTime ? dueDate : Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: dueDate)
+    }
+
+    /// Past its time, or for a reminder without a time, past its day, whether done or not.
+    var isPastDue: Bool {
+        guard let dueDate else { return false }
+        return hasTime ? dueDate < .now : dueDate < Calendar.current.startOfDay(for: .now)
+    }
+
+    var isOverdue: Bool { !isDone && isPastDue }
+}
+
 /// The part of an expense paid from one income.
 @Model
 final class Funding {
@@ -432,6 +571,11 @@ final class ExpectedPayment {
 
     var paymentDates: [Date] {
         Self.paymentDates(frequency: frequency, start: startDate, end: endDate)
+    }
+
+    /// Every payment has come in: the last payment date is before today.
+    var isFinished: Bool {
+        (paymentDates.last ?? startDate) < Calendar.current.startOfDay(for: .now)
     }
 
     /// Every payment date from start to end, in order.

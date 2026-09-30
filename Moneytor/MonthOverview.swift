@@ -116,13 +116,15 @@ struct MonthOverview: View {
         let monthLogs = logs
             .filter { calendar.isDate($0.effectiveDate, equalTo: month, toGranularity: .month) }
             .sorted { $0.effectiveDate > $1.effectiveDate }
+        // Against limits, a payment made in advance counts in the month it was for.
+        let countedLogs = logs.filter { calendar.isDate($0.countedDate, equalTo: month, toGranularity: .month) }
         let rows = categories.compactMap { category -> (category: BudgetCategory, spent: Decimal, limit: Decimal)? in
-            let spent = monthLogs.filter { $0.category == category }.reduce(0) { $0 + $1.amount }
+            let spent = countedLogs.filter { $0.category == category }.reduce(0) { $0 + $1.amount }
             // Archived categories don't record when they stopped, so they only count in months they were used.
             let limit = category.isArchived && spent == 0 ? 0 : category.limit(inMonthOf: month)
             return spent == 0 && limit == 0 ? nil : (category, spent, limit)
         }
-        let spent = monthLogs.reduce(0) { $0 + $1.amount }
+        let spent = countedLogs.reduce(0) { $0 + $1.amount }
         let planned = rows.reduce(0) { $0 + $1.limit }
         let shownRows = rows.filter { matches($0.category.name) }.sorted { $0.spent > $1.spent }
         let shownLogs = monthLogs.filter { matches($0.note) || matches($0.category?.name ?? "") }
@@ -227,9 +229,13 @@ struct MonthOverview: View {
         let monthInterval = calendar.dateInterval(of: .month, for: month) ?? DateInterval(start: month, duration: 0)
         let bills = planned
             .flatMap { row in
-                row.category.dueDates(in: monthInterval).map { (category: row.category, due: $0, amount: row.category.limitAmount(inMonthOf: $0)) }
+                let unpaid = Set(row.category.unpaidDues(until: monthInterval.end).map(\.date))
+                return row.category.dueDates(in: monthInterval).map {
+                    (category: row.category, due: $0, amount: row.category.limitAmount(inMonthOf: $0), isPaid: !unpaid.contains($0))
+                }
             }
             .sorted { $0.due < $1.due }
+        let paidAhead = bills.filter(\.isPaid).reduce(0) { $0 + $1.amount }
         let billIDs = Set(bills.map(\.category.persistentModelID))
         let limits = planned.filter { !billIDs.contains($0.category.persistentModelID) }.sorted { $0.amount > $1.amount }
         let income = incomes.map { income in
@@ -264,6 +270,11 @@ struct MonthOverview: View {
                         Text("\(planned.count) \(planned.count == 1 ? "category" : "categories") · \(bills.count) \(bills.count == 1 ? "bill" : "bills") due")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if paidAhead > 0 {
+                            Label("\(paidAhead.formatted(.currency(code: currencyCode))) already paid in advance", systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
@@ -288,13 +299,15 @@ struct MonthOverview: View {
                             IconTile(icon: bill.category.icon)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(bill.category.name)
-                                Text("Due \(bill.due.formatted(shortDate))")
+                                Text("Due \(bill.due.formatted(shortDate))" + (bill.isPaid ? " · Paid in advance" : ""))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(bill.isPaid ? .green : .secondary)
                             }
                             Spacer()
                             Text(bill.amount, format: .currency(code: currencyCode))
                                 .monospacedDigit()
+                                .strikethrough(bill.isPaid)
+                                .foregroundStyle(bill.isPaid ? .secondary : .primary)
                         }
                     }
                 }

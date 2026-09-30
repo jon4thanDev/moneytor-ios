@@ -15,7 +15,22 @@ enum Appearance: String, CaseIterable {
     }
 }
 
+/// Opens Settings from the gear button on any page.
+@Observable @MainActor
+final class SettingsRouter {
+    static let shared = SettingsRouter()
+    var isShowing = false
+}
+
+/// The gear at the top of each page. Settings has no tab of its own, so the add button fits in the tab bar.
+struct SettingsButton: View {
+    var body: some View {
+        Button("Settings", systemImage: "gearshape") { SettingsRouter.shared.isShowing = true }
+    }
+}
+
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @AppStorage("appearance") private var appearance: Appearance = .system
     @AppStorage("linksExpensesToIncome") private var linksExpenses = false
     @Query private var logs: [SpendLog]
@@ -57,6 +72,12 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
             .onChange(of: linksExpenses) { _, isOn in
                 if isOn && unlinkedCount > 0 { isLinkingExpenses = true }
             }

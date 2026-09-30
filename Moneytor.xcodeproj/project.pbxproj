@@ -38,6 +38,7 @@
 		CCDAC120D17997E4629C9C2A /* TransferSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C619DDC047405CC1A82C05A5 /* TransferSheet.swift */; };
 		D04F41894B5723BF2DD46F34 /* AssistantShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FF16ED38CC0C6F713AC109 /* AssistantShortcut.swift */; };
 		D1C25E34FDDEC2E515E30407 /* MoneyField.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB25591EF5C1E0D6CABAD07 /* MoneyField.swift */; };
+		DFCD16999EE27A20D1D90263 /* Reminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60712C66EDDB260CA3FED9E3 /* Reminders.swift */; };
 		EBE7E0A86C460700D7C620E1 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB54B45B59885920B24C8DE7 /* WidgetSnapshot.swift */; };
 		F6B1478263AA959CB95CA1A6 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = F5DE2D08589E48D5656895C6 /* MLXLLM */; };
 		F8E829E1EF3AA17AC8C3E721 /* LocalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314FD8F3BF2E4CEE9464E9AE /* LocalModel.swift */; };
@@ -79,6 +80,7 @@
 		52BF13347708D521444AAE5A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		555B9EC2A4126D32CA33FFDA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56425DA224700B687E2DAFEB /* IncomeLinking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomeLinking.swift; sourceTree = "<group>"; };
+		60712C66EDDB260CA3FED9E3 /* Reminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reminders.swift; sourceTree = "<group>"; };
 		6524B7CAD1C4C1B4EA08460F /* MoneytorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneytorApp.swift; sourceTree = "<group>"; };
 		6AC50F40791841EE1D015FB5 /* BudgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetView.swift; sourceTree = "<group>"; };
 		6FC3A2E274ED559C0EE511E9 /* MonthOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthOverview.swift; sourceTree = "<group>"; };
@@ -163,6 +165,7 @@
 				6524B7CAD1C4C1B4EA08460F /* MoneytorApp.swift */,
 				6FC3A2E274ED559C0EE511E9 /* MonthOverview.swift */,
 				CADE41E0696CABD0103E17DA /* NewMonthSheet.swift */,
+				60712C66EDDB260CA3FED9E3 /* Reminders.swift */,
 				BBBEDB7F24F15D4F57889F3E /* SettingsView.swift */,
 				435AEEA0F02C3C214AA98A59 /* SpeechRecognizer.swift */,
 				CECD7E49B93497D9C10FC515 /* SummaryCard.swift */,
@@ -314,6 +317,7 @@
 				54FC35793BD68F7C6DA28861 /* MoneytorApp.swift in Sources */,
 				0EDBEC179ABD7A62EC58763E /* MonthOverview.swift in Sources */,
 				260539CCDCEE20A9220AE50D /* NewMonthSheet.swift in Sources */,
+				DFCD16999EE27A20D1D90263 /* Reminders.swift in Sources */,
 				1669FA6E90FA88FCE3CAB1E9 /* SettingsView.swift in Sources */,
 				68FB639DC6EE5B7BE35E02E3 /* SpeechRecognizer.swift in Sources */,
 				1C63B87EF6B4333BCA98AB9F /* SummaryCard.swift in Sources */,

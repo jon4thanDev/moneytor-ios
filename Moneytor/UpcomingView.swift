@@ -7,8 +7,15 @@ struct UpcomingView: View {
     private var categories: [BudgetCategory]
     @Query(sort: \ExpectedPayment.startDate) private var payments: [ExpectedPayment]
     @Query(sort: \IncomeSource.createdAt) private var incomes: [IncomeSource]
-    @State private var payingCategory: BudgetCategory?
+    @State private var paying: BillToPay?
     @State private var searchText = ""
+
+    private struct BillToPay: Identifiable {
+        let id = UUID()
+        let category: BudgetCategory
+        /// The due date being paid; nil for the earliest unpaid one.
+        var due: Date?
+    }
 
     private struct Item: Identifiable {
         let id = UUID()
@@ -100,7 +107,7 @@ struct UpcomingView: View {
                                     Text(bill.amount, format: .currency(code: currencyCode))
                                         .font(.subheadline.weight(.semibold))
                                         .monospacedDigit()
-                                    Button("Pay") { payingCategory = bill.category }
+                                    Button("Pay") { paying = BillToPay(category: bill.category) }
                                         .buttonStyle(.borderedProminent)
                                         .controlSize(.small)
                                         .tint(tint)
@@ -149,9 +156,12 @@ struct UpcomingView: View {
                 }
             }
             .navigationTitle("Upcoming")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
+            }
             .collapsesTabBarOnScroll()
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search bills and payments")
-            .sheet(item: $payingCategory) { PayBillSheet(category: $0) }
+            .sheet(item: $paying) { PayBillSheet(category: $0.category, due: $0.due) }
         }
     }
 
@@ -190,10 +200,15 @@ struct UpcomingView: View {
                             Text((item.isIncoming ? 1 : -1) * item.amount, format: .currency(code: currencyCode))
                                 .monospacedDigit()
                                 .foregroundStyle(item.isIncoming ? .green : dayItems.count > 1 ? .secondary : .primary)
-                            if group.key < today, let category = item.category {
-                                Button("Pay") { payingCategory = category }
-                                    .buttonStyle(.borderedProminent)
+                            if let category = item.category {
+                                let button = Button("Pay") { paying = BillToPay(category: category, due: item.date) }
                                     .controlSize(.small)
+                                // Overdue bills stand out; later ones can be paid early.
+                                if group.key < today {
+                                    button.buttonStyle(.borderedProminent)
+                                } else {
+                                    button.buttonStyle(.bordered)
+                                }
                             }
                         }
                     }
@@ -203,9 +218,11 @@ struct UpcomingView: View {
     }
 }
 
-/// Logs an overdue bill as paid, noting which income the money came from.
+/// Logs a bill as paid, noting which income the money came from. A due date in a later period is
+/// paid in advance for that period.
 private struct PayBillSheet: View {
     let category: BudgetCategory
+    var due: Date?
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -220,6 +237,7 @@ private struct PayBillSheet: View {
     var body: some View {
         let salary = incomes.first { $0.name.localizedCaseInsensitiveContains("salary") }?.name ?? "Salary"
         let sources = [salary] + incomes.map(\.name).filter { $0 != salary }
+        let aheadPeriod = due.flatMap { category.isInCurrentPeriod($0) ? nil : category.period(containing: $0) }
 
         NavigationStack {
             Form {
@@ -235,6 +253,10 @@ private struct PayBillSheet: View {
                     }
                 } header: {
                     Label(category.name, systemImage: category.icon)
+                } footer: {
+                    if let aheadPeriod, let due {
+                        Text("Due \(due.formatted(.dateTime.month(.abbreviated).day())). Paying now counts toward \(category.title(of: aheadPeriod)), not \(category.periodName).")
+                    }
                 }
 
                 if linksExpenses {
@@ -271,7 +293,7 @@ private struct PayBillSheet: View {
                     }
                 }
             }
-            .navigationTitle("Pay Bill")
+            .navigationTitle(aheadPeriod == nil ? "Pay Bill" : "Pay in Advance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -281,6 +303,7 @@ private struct PayBillSheet: View {
                     Button("Pay") {
                         guard let amount else { return }
                         let log = SpendLog(amount: amount, note: "", date: nil, category: category)
+                        log.paidAheadFor = aheadPeriod?.start
                         context.insert(log)
                         if linksExpenses {
                             log.setFundings(fundingAmounts, from: incomes, in: context)
@@ -298,7 +321,10 @@ private struct PayBillSheet: View {
                 }
             }
             .onAppear {
-                amount = max(category.unpaidDue?.amount ?? category.remainingThisPeriod, 0)
+                let dueAmount = due.flatMap { due in
+                    category.unpaidDues(until: due.addingTimeInterval(1)).first { $0.date == due }?.amount
+                }
+                amount = max(dueAmount ?? category.unpaidDue?.amount ?? category.remainingThisPeriod, 0)
                 paidFrom = salary
             }
         }

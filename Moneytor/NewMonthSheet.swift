@@ -15,7 +15,7 @@ struct NewMonthSheet: View {
         let lastMonth = Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
         let spentLastMonth = categories
             .flatMap(\.logs)
-            .filter { Calendar.current.isDate($0.effectiveDate, equalTo: lastMonth, toGranularity: .month) }
+            .filter { Calendar.current.isDate($0.countedDate, equalTo: lastMonth, toGranularity: .month) }
             .reduce(0) { $0 + $1.amount }
         let totalLimit = categories.reduce(0) { $0 + $1.limitThisMonth }
 
